@@ -1,0 +1,4 @@
+CompileFlags:
+  Add: [
+    "-I3rdparty/llvm/include",
+  ]

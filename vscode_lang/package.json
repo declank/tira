@@ -1,0 +1,26 @@
+{
+  "name": "tira",
+  "displayName": "Tira",
+  "publisher": "tira-lang",
+  "description": "Tira Language Support",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.70.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [{
+      "id": "tira",
+      "aliases": ["Tira", "tira"],
+      "extensions": [".tira"],
+      "configuration": "./language-configuration.json"
+    }],
+    "grammars": [{
+      "language": "tira",
+      "scopeName": "source.tira",
+      "path": "./syntaxes/tira.tmLanguage.json"
+    }]
+  }
+}
