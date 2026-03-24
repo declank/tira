@@ -1,2 +1,0 @@
-# tira
-Tira Programming Language
