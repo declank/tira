@@ -13,15 +13,15 @@
 
 typedef struct {
     String message;
-    size_t line;
-    size_t column;
+    uint32_t line;
+    uint32_t column;
 } ParseError;
 
 #define X_PARSER_NODE_KINDS                                                           \
     X(NUMBER) X(STRING) X(IDENTIFIER) X(BINARY_OP) X(UNARY) X(VAR_DECL) X(CONST_DECL) \
     X(ASSIGNMENT) X(BLOCK) X(CALL) X(ARRAY_LITERAL) X(FUNC_DECL) X(IF_EXPR) X(RETURN) \
     X(NIL) X(FUNC_CALL) X(INDEX) X(RANGE) X(DOT_ACCESS) X(BOOL) X(AGGREGATE) X(TERNARY) \
-    X(FOR_EXPR) X(CAST)
+    X(FOR_EXPR) X(CAST) X(PARAM)
 
 // X(FUNC_DECL) X(CFFI_FUNC_DECL)
 
@@ -36,7 +36,6 @@ static String node_kind_strings[] = {X_PARSER_NODE_KINDS};
 typedef struct ParserNode ParserNode;
 
 typedef int8_t b8;
-typedef String Symbol;
 
 typedef enum {
     BINOP_ADD,
@@ -51,14 +50,19 @@ typedef enum {
     QUALIFIER_VAR
 } TypeQualifier;
 
-typedef struct { Symbol name; Symbol type; b8 ref; b8 array; } Param;
-typedef struct { Symbol type; b8 ref; } TypeParam;
+typedef struct {
+    String str;
+    size_t hash;
+} InternedStr;
+
+typedef struct { InternedStr name; InternedStr type; } Param;
+typedef struct { InternedStr name; } TypeParam;
 
 typedef struct { ParserNode **stmts; size_t count; Param *params; size_t params_count; } Node_Block;
-typedef struct { Symbol identifier; Param *params; int param_count; Symbol ret; TypeParam* type_params; uint32_t type_params_count; b8 cffi; ParserNode *block; } Node_FuncDecl;
+typedef struct { InternedStr identifier; Param *params; int param_count; InternedStr ret; ParserNode *block; } Node_FuncDecl;
 typedef struct { ParserNode *callee; ParserNode **args; size_t args_count; } Node_FuncCall;
 typedef struct { ParserNode *expr; } Node_Return;
-typedef struct { Symbol identifier; ParserNode *type; ParserNode *rhs; TypeQualifier qualifier; } Node_ConstVarDecl;
+typedef struct { InternedStr identifier; ParserNode *type; ParserNode *rhs; TypeQualifier qualifier; } Node_ConstVarDecl;
 typedef struct { ParserNode *lhs; ParserNode *rhs; } Node_Assign;
 typedef struct { ParserNode **elems; size_t count; ParserNode *length_expr; } Node_ArrayLiteral;
 typedef struct { BinaryOpType type; ParserNode *lhs; ParserNode *rhs; } Node_BinaryOp;
@@ -78,7 +82,7 @@ struct ParserNode {
         double real_value;
         intptr_t int_value;
         b8 bool_value;
-        Symbol identifier;
+        InternedStr identifier;
         String string;
         Node_Block block;
         Node_FuncDecl func_decl;
@@ -100,13 +104,10 @@ struct ParserNode {
     };
 };
 
-typedef enum {
-    PE_SYNTAX,
-} ParserErrorKind;
-
 typedef struct {
-    size_t loc;
-    ParserErrorKind kind;
+    uint32_t line;
+    uint32_t col;
+    char *msg;
 } ParserError;
 
 typedef struct {
@@ -231,22 +232,6 @@ static Token *expect(Parser *p, TokenType type, const char *msg) {
     }
 
     return advance(p);
-}
-
-static Symbol make_symbol(Parser *p, Token *token /* , Arena *arena */) {
-    // Symbol* s = new(arena, Symbol, 1);
-    char *data = NULL;
-    size_t len = 0;
-
-    if (token != NULL) {
-        data = p->source.data + token->start;
-        len = token->length;
-    }
-
-    return (Symbol){
-        .data = data,
-        .len = len,
-    };
 }
 
 static void parse_cffi_func_decl(Parser *p);
@@ -395,8 +380,8 @@ typedef enum {
     PREC_HIGHEST = PREC_PRIMARY,
 } Precedence;
 
-static Token current(Parser *p) {
-    return p->tokens[p->pos];    
+static Token* current(Parser *p) {
+    return &p->tokens[p->pos];    
 }
 
 static ParserNode *parse_bare_call(Parser *p, ParserNode *lhs);
@@ -474,24 +459,6 @@ static ParserNode *make_multi_assign(Parser *p,
     return node;
 }
 
-static ParserNode *parse_expr_stmt(Parser *p) {
-    PRINT_FUNC_NAME;
-    ParserNode *expr = parse_expr(p);
-
-    /* if (expr->kind == NODE_IDENTIFIER && is_expr_start(current(p).type))
-        return parse_bare_call(p, expr); */
-
-    /* if (match(p, T_COMMA)) {
-        ParserNode **targets, **values; 
-        int target_count = collect_lhs_tuple(p, expr, targets);
-        expect(p, T_EQUALS, "Multiple values with comma should have assignment.");
-        int value_count = collect_rhs_tuple(p, values);
-        return make_multi_assign(p, targets, target_count, values, value_count);
-    } */
-
-    return expr;
-}
-
 static ParserNode *parse_ident(Parser *p);
 static ParserNode *parse_block(Parser *p, TokenType block_end);
 static ParserNode *parse_func_decl(Parser *p);
@@ -536,6 +503,14 @@ static ParserNode *parse_return(Parser *p) {
     return ret;
 }
 
+static InternedStr str_intern(Parser *p, Token *tok) {
+    // TODO refactor this to add to the string table p->string_table
+    return (InternedStr) {
+        .str = (String) { .data = p->source.data + tok->start, .len = tok->length },
+        .hash = 0
+    };
+}
+
 static ParserNode *parse_const_var_decl(Parser *p, TokenType type) {
     PRINT_FUNC_NAME;
 
@@ -547,17 +522,16 @@ static ParserNode *parse_const_var_decl(Parser *p, TokenType type) {
 
     if (type == T_VAR) {
         node = new_node(p, NODE_VAR_DECL);
-        node->const_var_decl.identifier.data = p->source.data + ident->start;
-        node->const_var_decl.identifier.len = ident->length;
+        node->const_var_decl.identifier = str_intern(p, ident);
         node->const_var_decl.rhs = rhs;
     } else if (type == T_CONST) {
         node = new_node(p, NODE_CONST_DECL);
-        node->const_var_decl.identifier.data = p->source.data + ident->start;
-        node->const_var_decl.identifier.len = ident->length;
+        node->const_var_decl.identifier = str_intern(p, ident);
         node->const_var_decl.rhs = rhs;
+    } else {
+        assert(0);
     }
 
-    //node->const_var_decl.type = TYPE_AUTO;
     return node;
 }
 
@@ -568,9 +542,8 @@ static ParserNode *parse_main(Parser *p) {
     ParserNode *node = new_node(p, NODE_FUNC_DECL);
 
     // Hacky way of saving "main" keyword also as the function name, later we will implement "main" as a macro instead of keyword
-    Token main = current(p);
-    node->func_decl.identifier.data = p->source.data + main.start;
-    node->func_decl.identifier.len = main.length;
+    Token* main = current(p);
+    node->func_decl.identifier = str_intern(p, main);
 
     // TODO: Case for main(args: []string)
     node->func_decl.params = NULL;
@@ -591,7 +564,7 @@ static ParserNode *parse_stmt(Parser *p) {
     if (match(p, T_MAIN))   return parse_main(p);
     if (match(p, T_VAR))    return parse_const_var_decl(p, T_VAR);
     if (match(p, T_CONST))  return parse_const_var_decl(p, T_CONST);
-    else                    return parse_expr_stmt(p);
+    else                    return parse_expr(p);
 }
 
 typedef ParserNode *(*PrefixFn)(Parser *);
@@ -652,8 +625,7 @@ static ParserNode *parse_ident(Parser *p) {
 
     ParserNode *node = new_node(p, NODE_IDENTIFIER);
     Token *tok = previous(p);
-    node->identifier.data = p->source.data + tok->start;
-    node->identifier.len = tok->length;
+    node->identifier = str_intern(p, tok);
 
     return node;
 }
@@ -696,34 +668,14 @@ static Param parse_param(Parser *p) {
     Token *param_tok = advance(p);
 
     Param param;
-    param.name.data = p->source.data + param_tok->start;
-    param.name.len = param_tok->length;
+    param.name = str_intern(p, param_tok);
 
     if (match(p, T_COLON)) {
-        param.ref = match(p, T_REF);
-        if (match(p, T_LSQBRACKET)) {
-            if (expect(p, T_RSQBRACKET, "Expected [] in type specifier for array") != NULL)
-                param.array = true;
-        }
         Token *type_tok = expect(p, T_IDENT, "Expected type after : in parameter");
-        param.type.data = p->source.data + type_tok->start;
-        param.type.len = type_tok->length;
+        param.type = str_intern(p, type_tok);
     }
 
     return param;
-}
-
-// Following is used for generic type parameters
-static TypeParam parse_type_param(Parser *p) {
-    PRINT_FUNC_NAME;
-
-    Token *type_param_tok = advance(p);
-
-    TypeParam type_param;
-    type_param.type.data = p->source.data + type_param_tok->start;
-    type_param.type.len = type_param_tok->length;
-
-    return type_param;
 }
 
 static ParserNode *parse_func_decl(Parser *p) {
@@ -733,17 +685,6 @@ static ParserNode *parse_func_decl(Parser *p) {
 
     TypeParam *type_params = NULL;
     size_t type_params_count = 0;
-
-    if (peek(p)->type == T_LSQBRACKET) {
-        advance(p);
-
-        do {
-            type_params = realloc_array(p->arena, type_params, TypeParam, type_params_count + 1);
-            type_params[type_params_count++] = parse_type_param(p);
-        } while (match(p, T_COMMA));
-
-        expect(p, T_RSQBRACKET, "Expected ']' after template type arguments.");
-    }
 
     Param *params = NULL;
     size_t params_count = 0;
@@ -760,10 +701,7 @@ static ParserNode *parse_func_decl(Parser *p) {
     }
 
     ParserNode *node = new_node(p, NODE_FUNC_DECL);
-    node->func_decl.identifier.data = p->source.data + ident->start;
-    node->func_decl.identifier.len = ident->length;
-    node->func_decl.type_params = type_params;
-    node->func_decl.type_params_count = type_params_count;
+    node->func_decl.identifier = str_intern(p, ident);
     node->func_decl.params = params;
     node->func_decl.param_count = params_count;
 
@@ -1044,7 +982,7 @@ static ParserNode *parse_expr(Parser *p) {
 }
 
 static void skip_newlines(Parser *p) {
-    while (current(p).type == T_NEWLINE)
+    while (current(p)->type == T_NEWLINE)
         advance(p);
 }
 
@@ -1065,7 +1003,7 @@ static ParserNode *parse_if_expr(Parser *p) {
     skip_newlines(p);
     if (match(p, T_ELSE)) {
         skip_newlines(p);
-        if (current(p).type == T_IF) { // 
+        if (current(p)->type == T_IF) { // 
             advance(p);
             else_branch = parse_if_expr(p);
         } else {

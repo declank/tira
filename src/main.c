@@ -204,7 +204,7 @@ void debug_print_node_info(Parser p, StringBuilder sb, ParserNode n) {
 #define NODE_DIFF(x) ((x) - &p.nodes[0])
     switch (n.kind) {
         case NODE_IDENTIFIER: 
-            { sb_build(&g_sb, n.identifier); } break;
+            { sb_build(&g_sb, n.identifier.str); } break;
         case NODE_ASSIGNMENT:
             { sb_lhs(NODE_DIFF(n.assign.lhs)) ; sb_rhs(NODE_DIFF(n.assign.rhs)); } break;
         case NODE_NUMBER:
