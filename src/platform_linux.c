@@ -214,23 +214,29 @@ void __assert_fail(const char *assertion,
 #define MAX_ARGS 64
 int main(int argc, const char *argv[]);
 
-void _start(void) {
-    uint64_t *stack;
-    __asm__ ("mov %%rsp, %0" : "=r"(stack));
+/* void _start(void) {
+    register uint64_t *stack __asm__("rsp");
 
-    // TODO need to rethink the MAX_ARGS approach here
     int argc = (int)stack[0];
-    //assert(argc <= MAX_ARGS);
     const char **argv = (const char **)&stack[1];
+    const char **envp = (const char **)&stack[argc + 2];
 
-    __asm__ volatile(
-        "andq $-16, %%rsp"
-        :
-        :
-        : "rsp"
-    );
+    __asm__ volatile("andq $-16, %%rsp" ::: "rsp");
+    
     int ret = main(argc, argv);
-    //syscall1(SYS_exit, ret);
     exit(ret);
+} */
+
+__attribute__((naked)) void _start(void) {
+    __asm__ volatile (
+        ".intel_syntax noprefix\n"
+        "xor  rbp, rbp\n"
+        "mov  rdi, [rsp]\n"
+        "lea  rsi, [rsp + 8]\n"
+        "and  rsp, -16\n"
+        "call main\n"
+        "mov  edi, eax\n"
+        "call exit\n"
+    );
 }
 

@@ -4,9 +4,7 @@
 
 #include "memory.h"
 #include "common.h"
-#include "codegen.h"
 #include "lexer.h"
-#include "ir.h"
 #include "parser.h"
 #include "platform.h"
 //#include "semantic.h"
@@ -258,19 +256,12 @@ void debug_print_parser(Compiler *c) {
 void compiler_codegen(Compiler *c) {
     assert(c->stage == STAGE_PARSED);
     c->stage = STAGE_CODEGEN;
-
-    codegen(&c->parser);
-
 }
 
 void compiler_run(Compiler *c) {
     assert(c->stage == STAGE_CODEGEN);
     c->stage = STAGE_RAN;
 }
-
-void test_rt(void);
-
-void semantic_analyze(ParserNode *nodes, uint32_t *global_decls, uint32_t global_decl_count);
 
 int main(int argc, const char *argv[]) {
     (void) argc;
@@ -281,7 +272,7 @@ int main(int argc, const char *argv[]) {
     Arena temp_arena = arena_create(megabytes(16));
     
     Compiler c = compiler_init(&arena, &code_arena, &temp_arena);
-    FileBuf input_file = read_entire_file("source.tira", &arena);
+    FileBuf input_file = read_entire_file(argv[1], &arena);
 
     print(S("==========\n"));
     print(input_file);
@@ -298,8 +289,6 @@ int main(int argc, const char *argv[]) {
     compiler_parse(&c);
     print(S("==========\n"));
     debug_print_parser(&c);
-
-    semantic_analyze(c.parser.nodes, c.parser.statements, c.parser.statement_count);
  
     compiler_codegen(&c);
     compiler_run(&c);
