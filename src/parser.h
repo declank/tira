@@ -1,5 +1,11 @@
 #pragma once
 
+/*
+//- We will define the grammar so that it is searchable
+//- Each grammar definition starts with '//-' so these are easy to grep
+//-
+*/
+
 #include "common.h"
 #include "lexer.h"
 #include "memory.h"
@@ -38,6 +44,7 @@ typedef struct ParserNode ParserNode;
 typedef int8_t b8;
 
 typedef enum {
+    BINOP_INVALID,
     BINOP_ADD,
     BINOP_SUB,
     BINOP_MUL,
@@ -195,6 +202,35 @@ typedef enum {
         print(S("\n"));                                                        \
     } while (0)
 
+typedef enum {
+    PREC_NONE,
+    PREC_COMMA,
+    PREC_ASSIGN,
+    PREC_TERNARY,
+    PREC_OR,
+    PREC_AND,
+    PREC_CMP,
+    PREC_RANGE,
+    PREC_TERM,
+    PREC_FACTOR,
+    PREC_UNARY,
+    PREC_CALL,
+    PREC_PRIMARY,
+    PREC_COUNT,
+
+    PREC_LOWEST = PREC_NONE,
+    PREC_HIGHEST = PREC_PRIMARY,
+} Precedence;
+
+typedef ParserNode *(*PrefixFn)(Parser *);
+typedef ParserNode *(*InfixFn)(Parser *, ParserNode *);
+
+typedef struct {
+    PrefixFn prefix;
+    InfixFn infix;
+    Precedence precedence;
+} ParseRule;
+
 static Token *peek(Parser *p) { return &p->tokens[p->pos]; }
 
 static Token *advance(Parser *p) { return &p->tokens[p->pos++]; }
@@ -204,8 +240,15 @@ static int match(Parser *p, TokenType t) {
         advance(p);
         return 1;
     }
-
     return 0;
+}
+
+static InternedStr str_intern(Parser *p, Token *tok) {
+    // TODO refactor this to add to the string table p->string_table
+    return (InternedStr) {
+        .str = (String) { .data = p->source.data + tok->start, .len = tok->length },
+        .hash = 0
+    };
 }
 
 static void raise_error(Parser *p, const char *msg) {
@@ -221,6 +264,16 @@ static void raise_error(Parser *p, const char *msg) {
     p->error_count++;
 }
 
+static Token *previous(Parser *p) {
+    PRINT_FUNC_NAME;
+    assert(p->pos > 0);
+    return &p->tokens[p->pos - 1];
+}
+
+static Token* current(Parser *p) {
+    return &p->tokens[p->pos];    
+}
+
 static Token *expect(Parser *p, TokenType type, const char *msg) {
     (void)msg; // TODO
     Token *next_tok = peek(p);
@@ -234,10 +287,289 @@ static Token *expect(Parser *p, TokenType type, const char *msg) {
     return advance(p);
 }
 
-static void parse_cffi_func_decl(Parser *p);
-static void parse_cffi_struct_decl(Parser *p);
+static void block_add_stmt(ParserNode *block, ParserNode *stmt) {
+    // TODO
+}
+
+static ParserNode *new_node(Parser *p, ParserNodeKind kind) {
+    print(S(__FUNCTION__));
+    print(S(": "));
+    print(node_kind_strings[kind]);
+    print(S("\n"));
+
+    if (p->node_count >= p->node_cap) {
+        raise_error(p, "Exceeded node count in parser.");
+        exit(1);
+    }
+
+    ParserNode *node = &p->nodes[p->node_count++];
+    mem_zero(node);
+    node->kind = kind;
+    
+    return node;
+}
+
 static ParserNode *parse_stmt(Parser *p);
 static ParserNode *parse_expr(Parser *p);
+static ParserNode *parse_block(Parser *p, TokenType block_end);
+static Param parse_param(Parser *p);
+static ParserNode *parse_expr_prec(Parser *p, Precedence prec);
+
+static ParserNode *parse_number(Parser *p);
+static ParserNode *parse_string(Parser *p);
+static ParserNode *parse_ident(Parser *p);
+static ParserNode *parse_grouping(Parser *p);
+static ParserNode *parse_call(Parser *p, ParserNode *lhs);
+static ParserNode *parse_binary(Parser *p, ParserNode *lhs);
+static ParserNode *parse_unary(Parser *p);
+static ParserNode *parse_nil(Parser *p);
+static ParserNode *parse_bool(Parser *p);
+static ParserNode *parse_array_lit(Parser *p);
+static ParserNode *parse_index(Parser *p, ParserNode *lhs);
+static ParserNode *parse_range(Parser *p, ParserNode *lhs);
+static ParserNode *parse_dot(Parser *p, ParserNode *lhs);
+static ParserNode *parse_assign(Parser *p, ParserNode *lhs);
+static ParserNode *parse_if_expr(Parser *p);
+static ParserNode *parse_for_expr(Parser *p);
+static ParserNode *parse_cast(Parser *p);
+static ParserNode *parse_ternary(Parser *p, ParserNode *lhs);
+static ParserNode *parse_comma(Parser *p, ParserNode *lhs);
+
+static ParseRule rules[T_COUNT] = {
+    // ----- Terminals (literals and primaries)
+    [T_NUM] = {parse_number, NULL, PREC_NONE},
+    [T_STRING] = {parse_string, NULL, PREC_NONE},
+    //[T_IDENT] = {parse_ident, NULL, PREC_NONE},
+    [T_IDENT] = {parse_ident, NULL, PREC_NONE},
+    //  [T_TRUE]       = { parse_bool,      NULL,         PREC_NONE },
+    //  [T_FALSE]      = { parse_bool,      NULL,         PREC_NONE },
+    [T_NIL] = {parse_nil, NULL, PREC_NONE},
+    [T_TRUE] = {parse_bool, NULL, PREC_NONE},
+    [T_FALSE] = {parse_bool, NULL, PREC_NONE},
+
+    // ----- Grouping and collections
+    [T_LPAREN] = {parse_grouping, parse_call, PREC_CALL},
+    [T_LSQBRACKET] = {parse_array_lit, parse_index, PREC_CALL},
+    //[T_LBRACE] = {parse_block, NULL, PREC_NONE},
+    [T_COMMA] = {NULL, parse_comma, PREC_COMMA},
+
+    // ----- Unary
+    [T_MINUS] = {parse_unary, parse_binary, PREC_TERM},
+    [T_NOT] = {parse_unary, NULL, PREC_NONE},
+
+    // ----- Infix arithmetic
+    [T_PLUS] = {NULL, parse_binary, PREC_TERM},
+    [T_ASTERISK] = {NULL, parse_binary, PREC_FACTOR},
+    [T_SLASH] = {NULL, parse_binary, PREC_FACTOR},
+    //  [T_PERCENT]    = { NULL,            parse_binary, PREC_FACTOR },
+
+    // ----- Comparison
+    [T_LT] = {NULL, parse_binary, PREC_CMP},
+    [T_GT] = {NULL, parse_binary, PREC_CMP},
+    [T_LTEQ] = {NULL, parse_binary, PREC_CMP},
+    [T_GTEQ] = {NULL, parse_binary, PREC_CMP},
+    [T_EQEQ] = {NULL, parse_binary, PREC_CMP},
+    [T_NOT_EQ] = {NULL, parse_binary, PREC_CMP},
+
+    // ----- Logic
+    //  [T_AND]        = { NULL,            parse_binary, PREC_AND },
+    //  [T_OR]         = { NULL,            parse_binary, PREC_OR  },
+
+    // ----- Ternary operator ?:
+    [T_QUESTION] = {NULL, parse_ternary, PREC_TERNARY},
+
+    // ----- Ranges
+    [T_DOTDOT] = {NULL, parse_range, PREC_RANGE},
+    [T_DOTDOTEQ] = {NULL, parse_range, PREC_RANGE},
+
+    // ----- Method invocation/method access
+    [T_DOT] = {NULL, parse_dot, PREC_CALL},
+
+    // ----- Assignment
+    [T_EQUALS] = {NULL, parse_assign, PREC_ASSIGN},
+
+    // ----- Keywords
+    [T_IF] = {parse_if_expr, NULL, PREC_NONE},
+    //[T_FUNC] = {parse_func_decl, NULL, PREC_NONE},
+    [T_FOR] = {parse_for_expr, NULL, PREC_NONE},
+    [T_CAST] = {parse_cast, NULL, PREC_NONE},
+
+    // T_RBRACE and others to catch errors instead of segfault
+};
+
+//- program                = { top_level_declaration }
+//- top_level_declaration  = const_decl
+//-                        | var_decl
+//-                        | func_decl 
+//-                        | main_block
+//- 
+static void parse_program(Parser *p) {
+    PRINT_FUNC_NAME;
+    print(S("{\n\n"));
+
+    ParserNode *program = new_node(p, NODE_BLOCK);
+
+    while (peek(p)->type != T_END) {
+        if (match(p, T_NEWLINE) || match(p, T_SEMICOLON))
+            continue;
+        
+        ParserNode *stmt = parse_stmt(p);
+        block_add_stmt(program, stmt);
+
+        //getchar();
+
+        print(S("\n"));
+
+        if (peek(p)->type == T_END)
+            break;
+        if (!match(p, T_NEWLINE) && !match(p, T_SEMICOLON))        
+            raise_error(p, "No newline at end of statement\n");
+    }
+
+    print(S("}\n"));
+
+
+    if (p->error_count) {
+        console_error("Errors found in parsing.\n", 25);
+    }
+}
+
+//- const_decl             = 'const', identifier, [ '=', expr ]
+//- var_decl               = 'var', identifier, [ '=', expr ]
+//-
+static ParserNode *parse_const_var_decl(Parser *p, TokenType type) {
+    PRINT_FUNC_NAME;
+
+    Token *ident = expect(p, T_IDENT, "Variable or constant declaration must have a valid identifier on left-hand side.");
+    expect(p, T_EQUALS, "Variables must be initialised upon declaration. TODO remove"); // TODO
+
+    ParserNode *rhs = parse_expr(p);
+    ParserNode *node = NULL;
+
+    if (type == T_VAR) {
+        node = new_node(p, NODE_VAR_DECL);
+        node->const_var_decl.identifier = str_intern(p, ident);
+        node->const_var_decl.rhs = rhs;
+    } else if (type == T_CONST) {
+        node = new_node(p, NODE_CONST_DECL);
+        node->const_var_decl.identifier = str_intern(p, ident);
+        node->const_var_decl.rhs = rhs;
+    } else {
+        assert(0);
+    }
+
+    return node;
+}
+
+//- function_decl          = 'func', identifier, [ params ], block
+//-
+static ParserNode *parse_func_decl(Parser *p) {
+    PRINT_FUNC_NAME;
+
+    Token* ident = expect(p, T_IDENT, "Function name must follow 'func'");
+
+    TypeParam *type_params = NULL;
+    size_t type_params_count = 0;
+
+    Param *params = NULL;
+    size_t params_count = 0;
+
+    if (peek(p)->type == T_LPAREN) {
+        advance(p);
+
+        do {
+            params = realloc_array(p->arena, params, Param, params_count + 1);
+            params[params_count++] = parse_param(p);
+        } while (match(p, T_COMMA));
+
+        expect(p, T_RPAREN, "Expected ')' after arguments.");
+    }
+
+    ParserNode *node = new_node(p, NODE_FUNC_DECL);
+    node->func_decl.identifier = str_intern(p, ident);
+    node->func_decl.params = params;
+    node->func_decl.param_count = params_count;
+
+    expect(p, T_LBRACE, "Expected '{' at start of function block.");
+    node->func_decl.block = parse_block(p, T_RBRACE);
+
+    return node;
+}
+
+//- main_decl              = 'main', [ params ], block
+//- 
+static ParserNode *parse_main_decl(Parser *p) {
+    PRINT_FUNC_NAME;
+
+    ParserNode *node = new_node(p, NODE_FUNC_DECL);
+
+    // Hacky way of saving "main" keyword also as the function name, later we will implement "main" as a macro instead of keyword
+    Token* main = current(p);
+    node->func_decl.identifier = str_intern(p, main);
+
+    // TODO: Case for main(args: []string)
+    node->func_decl.params = NULL;
+    node->func_decl.param_count = 0;
+
+    expect(p, T_LBRACE, "Expected '{' at start of function block.");
+    node->func_decl.block = parse_block(p, T_RBRACE);
+
+    return node;
+}
+
+//- params                 = identifier, { ',', identifier }
+//- 
+static Param parse_param(Parser *p) {
+    PRINT_FUNC_NAME;
+
+    Token *param_tok = advance(p);
+
+    Param param;
+    param.name = str_intern(p, param_tok);
+
+    if (match(p, T_COLON)) {
+        Token *type_tok = expect(p, T_IDENT, "Expected type after : in parameter");
+        param.type = str_intern(p, type_tok);
+    }
+
+    return param;
+}
+
+//- (* Expressions ordered by precedence, lowest first *)
+//- expr                   = assignment
+//-
+static ParserNode *parse_expr(Parser *p) {
+    return parse_expr_prec(p, PREC_LOWEST);
+}
+
+static ParserNode *parse_expr_prec(Parser *p, Precedence prec) {
+    PRINT_FUNC_NAME;
+
+    Token *token = advance(p);
+    print(token_type_strings[token->type]);
+    print(S("\n"));
+
+    ParseRule *rule = &rules[token->type];
+    if (!rule->prefix) {
+        raise_error(p, "Expected expression.\n");
+        return NULL;
+    }
+
+    ParserNode *lhs = rule->prefix(p);
+
+    while (prec < rules[peek(p)->type].precedence) {
+        //assert(0);
+        token = advance(p);
+        rule = &rules[token->type];
+        lhs = rule->infix(p, lhs);
+    }
+
+    return lhs;
+}
+
+static void parse_cffi_func_decl(Parser *p);
+static void parse_cffi_struct_decl(Parser *p);
+
 
 static void dump_parser_state(Parser *p) {
     printf("pos=%u, nodes=%u, statements=%u, errors=%u\n",
@@ -360,43 +692,15 @@ static bool is_expr_start(TokenType type) {
     }
 }
 
-typedef enum {
-    PREC_NONE,
-    PREC_COMMA,
-    PREC_ASSIGN,
-    PREC_TERNARY,
-    PREC_OR,
-    PREC_AND,
-    PREC_CMP,
-    PREC_RANGE,
-    PREC_TERM,
-    PREC_FACTOR,
-    PREC_UNARY,
-    PREC_CALL,
-    PREC_PRIMARY,
-    PREC_COUNT,
-
-    PREC_LOWEST = PREC_NONE,
-    PREC_HIGHEST = PREC_PRIMARY,
-} Precedence;
-
-static Token* current(Parser *p) {
-    return &p->tokens[p->pos];    
-}
-
 static ParserNode *parse_bare_call(Parser *p, ParserNode *lhs);
 static int collect_lhs_tuple(Parser *p, ParserNode *first, ParserNode **targets);
 static int collect_rhs_tuple(Parser *p, ParserNode **values);
-
 
 /*
 Note the asymmetry — collect_lhs_tuple takes the already-parsed first node
 because your statement parser will have consumed it before knowing a comma
 was coming, whereas collect_rhs_tuple starts fresh after the =.
 */
-
-static ParserNode *parse_expr_prec(Parser *p, Precedence prec);
-
 
 int collect_lhs_tuple(Parser *p, ParserNode *first, ParserNode **targets) {
     PRINT_FUNC_NAME;
@@ -459,9 +763,15 @@ static ParserNode *make_multi_assign(Parser *p,
     return node;
 }
 
-static ParserNode *parse_ident(Parser *p);
-static ParserNode *parse_block(Parser *p, TokenType block_end);
-static ParserNode *parse_func_decl(Parser *p);
+static ParserNode *parse_ident(Parser *p) {
+    PRINT_FUNC_NAME;
+
+    ParserNode *node = new_node(p, NODE_IDENTIFIER);
+    Token *tok = previous(p);
+    node->identifier = str_intern(p, tok);
+
+    return node;
+}
 
 static ParserNode *parse_for_expr(Parser *p) {
     PRINT_FUNC_NAME;
@@ -503,101 +813,16 @@ static ParserNode *parse_return(Parser *p) {
     return ret;
 }
 
-static InternedStr str_intern(Parser *p, Token *tok) {
-    // TODO refactor this to add to the string table p->string_table
-    return (InternedStr) {
-        .str = (String) { .data = p->source.data + tok->start, .len = tok->length },
-        .hash = 0
-    };
-}
-
-static ParserNode *parse_const_var_decl(Parser *p, TokenType type) {
-    PRINT_FUNC_NAME;
-
-    Token *ident = expect(p, T_IDENT, "Variable or constant declaration must have a valid identifier on left-hand side.");
-    expect(p, T_EQUALS, "Variables must be initialised upon declaration. TODO remove"); // TODO
-
-    ParserNode *rhs = parse_expr(p);
-    ParserNode *node = NULL;
-
-    if (type == T_VAR) {
-        node = new_node(p, NODE_VAR_DECL);
-        node->const_var_decl.identifier = str_intern(p, ident);
-        node->const_var_decl.rhs = rhs;
-    } else if (type == T_CONST) {
-        node = new_node(p, NODE_CONST_DECL);
-        node->const_var_decl.identifier = str_intern(p, ident);
-        node->const_var_decl.rhs = rhs;
-    } else {
-        assert(0);
-    }
-
-    return node;
-}
-
-
-static ParserNode *parse_main(Parser *p) {
-    PRINT_FUNC_NAME;
-
-    ParserNode *node = new_node(p, NODE_FUNC_DECL);
-
-    // Hacky way of saving "main" keyword also as the function name, later we will implement "main" as a macro instead of keyword
-    Token* main = current(p);
-    node->func_decl.identifier = str_intern(p, main);
-
-    // TODO: Case for main(args: []string)
-    node->func_decl.params = NULL;
-    node->func_decl.param_count = 0;
-
-    expect(p, T_LBRACE, "Expected '{' at start of function block.");
-    node->func_decl.block = parse_block(p, T_RBRACE);
-
-    return node;
-}
-
 static ParserNode *parse_stmt(Parser *p) {
     PRINT_FUNC_NAME;
 
     //if (match(p, T_FOR))    return parse_for_stmt(p);
     if (match(p, T_RETURN)) return parse_return(p);
     if (match(p, T_FUNC))   return parse_func_decl(p);
-    if (match(p, T_MAIN))   return parse_main(p);
+    if (match(p, T_MAIN))   return parse_main_decl(p);
     if (match(p, T_VAR))    return parse_const_var_decl(p, T_VAR);
     if (match(p, T_CONST))  return parse_const_var_decl(p, T_CONST);
     else                    return parse_expr(p);
-}
-
-typedef ParserNode *(*PrefixFn)(Parser *);
-typedef ParserNode *(*InfixFn)(Parser *, ParserNode *);
-
-typedef struct {
-    PrefixFn prefix;
-    InfixFn infix;
-    Precedence precedence;
-} ParseRule;
-
-static ParserNode *new_node(Parser *p, ParserNodeKind kind) {
-    print(S(__FUNCTION__));
-    print(S(": "));
-    print(node_kind_strings[kind]);
-    print(S("\n"));
-
-    if (p->node_count >= p->node_cap) {
-        raise_error(p, "Exceeded node count in parser.");
-        exit(1);
-    }
-
-    ParserNode *node = &p->nodes[p->node_count++];
-    mem_zero(node);
-    node->kind = kind;
-    
-    return node;
-}
-
-static Token *previous(Parser *p) {
-    PRINT_FUNC_NAME;
-    assert(p->pos > 0);
-    return &p->tokens[p->pos - 1];
 }
 
 static ParserNode *parse_number(Parser *p) {
@@ -618,22 +843,6 @@ static ParserNode *parse_number(Parser *p) {
     }
 
     return node;
-}
-
-static ParserNode *parse_ident(Parser *p) {
-    PRINT_FUNC_NAME;
-
-    ParserNode *node = new_node(p, NODE_IDENTIFIER);
-    Token *tok = previous(p);
-    node->identifier = str_intern(p, tok);
-
-    return node;
-}
-
-static ParserNode *parse_expr_prec(Parser *p, Precedence prec);
-
-static void block_add_stmt(ParserNode *block, ParserNode *stmt) {
-    // TODO
 }
 
 static ParserNode *parse_block(Parser *p, TokenType block_end) {
@@ -662,54 +871,9 @@ static ParserNode *parse_block(Parser *p, TokenType block_end) {
     return block;
 }
 
-static Param parse_param(Parser *p) {
-    PRINT_FUNC_NAME;
 
-    Token *param_tok = advance(p);
 
-    Param param;
-    param.name = str_intern(p, param_tok);
 
-    if (match(p, T_COLON)) {
-        Token *type_tok = expect(p, T_IDENT, "Expected type after : in parameter");
-        param.type = str_intern(p, type_tok);
-    }
-
-    return param;
-}
-
-static ParserNode *parse_func_decl(Parser *p) {
-    PRINT_FUNC_NAME;
-
-    Token* ident = expect(p, T_IDENT, "Function name must follow 'func'");
-
-    TypeParam *type_params = NULL;
-    size_t type_params_count = 0;
-
-    Param *params = NULL;
-    size_t params_count = 0;
-
-    if (peek(p)->type == T_LPAREN) {
-        advance(p);
-
-        do {
-            params = realloc_array(p->arena, params, Param, params_count + 1);
-            params[params_count++] = parse_param(p);
-        } while (match(p, T_COMMA));
-
-        expect(p, T_RPAREN, "Expected ')' after arguments.");
-    }
-
-    ParserNode *node = new_node(p, NODE_FUNC_DECL);
-    node->func_decl.identifier = str_intern(p, ident);
-    node->func_decl.params = params;
-    node->func_decl.param_count = params_count;
-
-    expect(p, T_LBRACE, "Expected '{' at start of function block.");
-    node->func_decl.block = parse_block(p, T_RBRACE);
-
-    return node;
-}
 
 
 static ParserNode *parse_binary(Parser *p, ParserNode *lhs) {
@@ -890,96 +1054,6 @@ static ParserNode *parse_comma(Parser *p, ParserNode *lhs) {
     return make_multi_assign(p, targets, target_count, values, value_count);
 }
 
-static ParseRule rules[T_COUNT] = {
-    // ----- Terminals (literals and primaries)
-    [T_NUM] = {parse_number, NULL, PREC_NONE},
-    [T_STRING] = {parse_string, NULL, PREC_NONE},
-    //[T_IDENT] = {parse_ident, NULL, PREC_NONE},
-    [T_IDENT] = {parse_ident, NULL, PREC_NONE},
-    //  [T_TRUE]       = { parse_bool,      NULL,         PREC_NONE },
-    //  [T_FALSE]      = { parse_bool,      NULL,         PREC_NONE },
-    [T_NIL] = {parse_nil, NULL, PREC_NONE},
-    [T_TRUE] = {parse_bool, NULL, PREC_NONE},
-    [T_FALSE] = {parse_bool, NULL, PREC_NONE},
-
-    // ----- Grouping and collections
-    [T_LPAREN] = {parse_grouping, parse_call, PREC_CALL},
-    [T_LSQBRACKET] = {parse_array_lit, parse_index, PREC_CALL},
-    //[T_LBRACE] = {parse_block, NULL, PREC_NONE},
-    [T_COMMA] = {NULL, parse_comma, PREC_COMMA},
-
-    // ----- Unary
-    [T_MINUS] = {parse_unary, parse_binary, PREC_TERM},
-    [T_NOT] = {parse_unary, NULL, PREC_NONE},
-
-    // ----- Infix arithmetic
-    [T_PLUS] = {NULL, parse_binary, PREC_TERM},
-    [T_ASTERISK] = {NULL, parse_binary, PREC_FACTOR},
-    [T_SLASH] = {NULL, parse_binary, PREC_FACTOR},
-    //  [T_PERCENT]    = { NULL,            parse_binary, PREC_FACTOR },
-
-    // ----- Comparison
-    [T_LT] = {NULL, parse_binary, PREC_CMP},
-    [T_GT] = {NULL, parse_binary, PREC_CMP},
-    [T_LTEQ] = {NULL, parse_binary, PREC_CMP},
-    [T_GTEQ] = {NULL, parse_binary, PREC_CMP},
-    [T_EQEQ] = {NULL, parse_binary, PREC_CMP},
-    [T_NOT_EQ] = {NULL, parse_binary, PREC_CMP},
-
-    // ----- Logic
-    //  [T_AND]        = { NULL,            parse_binary, PREC_AND },
-    //  [T_OR]         = { NULL,            parse_binary, PREC_OR  },
-
-    // ----- Ternary operator ?:
-    [T_QUESTION] = {NULL, parse_ternary, PREC_TERNARY},
-
-    // ----- Ranges
-    [T_DOTDOT] = {NULL, parse_range, PREC_RANGE},
-    [T_DOTDOTEQ] = {NULL, parse_range, PREC_RANGE},
-
-    // ----- Method invocation/method access
-    [T_DOT] = {NULL, parse_dot, PREC_CALL},
-
-    // ----- Assignment
-    [T_EQUALS] = {NULL, parse_assign, PREC_ASSIGN},
-
-    // ----- Keywords
-    [T_IF] = {parse_if_expr, NULL, PREC_NONE},
-    //[T_FUNC] = {parse_func_decl, NULL, PREC_NONE},
-    [T_FOR] = {parse_for_expr, NULL, PREC_NONE},
-    [T_CAST] = {parse_cast, NULL, PREC_NONE},
-
-    // T_RBRACE and others to catch errors instead of segfault
-};
-
-static ParserNode *parse_expr_prec(Parser *p, Precedence prec) {
-    PRINT_FUNC_NAME;
-
-    Token *token = advance(p);
-    print(token_type_strings[token->type]);
-    print(S("\n"));
-
-    ParseRule *rule = &rules[token->type];
-    if (!rule->prefix) {
-        raise_error(p, "Expected expression.\n");
-        return NULL;
-    }
-
-    ParserNode *lhs = rule->prefix(p);
-
-    while (prec < rules[peek(p)->type].precedence) {
-        //assert(0);
-        token = advance(p);
-        rule = &rules[token->type];
-        lhs = rule->infix(p, lhs);
-    }
-
-    return lhs;
-}
-
-static ParserNode *parse_expr(Parser *p) {
-    return parse_expr_prec(p, PREC_LOWEST);
-}
 
 static void skip_newlines(Parser *p) {
     while (current(p)->type == T_NEWLINE)
@@ -1020,36 +1094,5 @@ static ParserNode *parse_if_expr(Parser *p) {
     node->if_expr.then_branch = then_branch;
     node->if_expr.else_branch = else_branch;
     return node;
-}
-
-static void parse_program(Parser *p) {
-    PRINT_FUNC_NAME;
-    print(S("{\n\n"));
-
-    while (peek(p)->type != T_END) {
-        if (match(p, T_NEWLINE) || match(p, T_SEMICOLON))
-            continue;
-        
-        ParserNode *stmt = parse_stmt(p);
-        if (p->statement_count < p->statement_cap) {
-            p->statements[p->statement_count++] = stmt - p->nodes;
-        } // TODO cleanup memory management
-
-        //getchar();
-
-        print(S("\n"));
-
-        if (peek(p)->type == T_END)
-            break;
-        if (!match(p, T_NEWLINE) && !match(p, T_SEMICOLON))        
-            raise_error(p, "No newline at end of statement\n");
-    }
-
-    print(S("}\n"));
-
-
-    if (p->error_count) {
-        console_error("Errors found in parsing.\n", 25);
-    }
 }
 

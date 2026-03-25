@@ -8,3 +8,6 @@
 
 int vsnprintf(char *buffer, size_t bufsz,  const char *format, va_list vlist);
 int error(const char *fmt, ...);
+
+int printf(const char* restrict format, ...);
+

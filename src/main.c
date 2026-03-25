@@ -10,6 +10,8 @@
 //#include "semantic.h"
 #include "string.h"
 
+#include "bootstrap_codgen.h"
+
 typedef enum {
     STAGE_UNINITIALIZED,
     STAGE_INITIALIZED,
@@ -251,11 +253,11 @@ void debug_print_parser(Compiler *c) {
     print_sb(g_sb);
 }
 
-
-
 void compiler_codegen(Compiler *c) {
     assert(c->stage == STAGE_PARSED);
     c->stage = STAGE_CODEGEN;
+
+    bootstrap_codegen(&c->parser);
 }
 
 void compiler_run(Compiler *c) {
@@ -266,6 +268,11 @@ void compiler_run(Compiler *c) {
 int main(int argc, const char *argv[]) {
     (void) argc;
     (void) argv;
+
+    if (argc != 2) {
+        error("Input file not specified. Exiting.\n");
+        return 1;
+    }
 
     Arena arena = arena_create(megabytes(16));
     Arena code_arena = arena_create_code(megabytes(4));

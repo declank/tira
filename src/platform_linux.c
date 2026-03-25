@@ -113,6 +113,10 @@ int console_error(const char *error, size_t length) {
     return write(STDERR_FILENO, error, length);
 }
 
+int console_out(const char *output, size_t length) {
+    return write(STDOUT_FILENO, output, length);
+}
+
 void print(String s) {
     // TODO assert(s.len <= ULONG_MAX);
     write(STDOUT_FILENO, s.data, s.len);
