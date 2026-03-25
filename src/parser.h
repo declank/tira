@@ -331,7 +331,6 @@ static ParserNode *parse_dot(Parser *p, ParserNode *lhs);
 static ParserNode *parse_assign(Parser *p, ParserNode *lhs);
 static ParserNode *parse_if_expr(Parser *p);
 static ParserNode *parse_for_expr(Parser *p);
-static ParserNode *parse_cast(Parser *p);
 static ParserNode *parse_ternary(Parser *p, ParserNode *lhs);
 static ParserNode *parse_comma(Parser *p, ParserNode *lhs);
 
@@ -392,8 +391,6 @@ static ParseRule rules[T_COUNT] = {
     [T_IF] = {parse_if_expr, NULL, PREC_NONE},
     //[T_FUNC] = {parse_func_decl, NULL, PREC_NONE},
     [T_FOR] = {parse_for_expr, NULL, PREC_NONE},
-    [T_CAST] = {parse_cast, NULL, PREC_NONE},
-
     // T_RBRACE and others to catch errors instead of segfault
 };
 
@@ -427,7 +424,6 @@ static void parse_program(Parser *p) {
     }
 
     print(S("}\n"));
-
 
     if (p->error_count) {
         console_error("Errors found in parsing.\n", 25);
@@ -776,19 +772,6 @@ static ParserNode *parse_for_expr(Parser *p) {
     ParserNode *node = new_node(p, NODE_FOR_EXPR);
     node->for_expr.ident = ident;
     node->for_expr.iter_expr = iter_expr;
-    return node;
-}
-
-static ParserNode *parse_cast(Parser *p) {
-    expect(p, T_LPAREN, "Expected '(' after cast operator");
-    // TODO review for the moment we will just parse ident but this would
-    // be a type expression (e.g. []u32 or ref T or anything)
-    ParserNode *type = parse_ident(p);
-    advance(p);
-    expect(p, T_RPAREN, "Expected ')' after type expression.");
-
-    ParserNode *node = new_node(p, NODE_CAST);
-    node->cast.to_type = type;
     return node;
 }
 
