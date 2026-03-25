@@ -69,7 +69,7 @@ typedef struct { ParserNode **stmts; size_t count; Param *params; size_t params_
 typedef struct { InternedStr identifier; Param *params; int param_count; InternedStr ret; ParserNode *block; } Node_FuncDecl;
 typedef struct { ParserNode *callee; ParserNode **args; size_t args_count; } Node_FuncCall;
 typedef struct { ParserNode *expr; } Node_Return;
-typedef struct { InternedStr identifier; ParserNode *type; ParserNode *rhs; TypeQualifier qualifier; } Node_ConstVarDecl;
+typedef struct { ParserNode *identifier; ParserNode *type; ParserNode *rhs; TypeQualifier qualifier; } Node_ConstVarDecl;
 typedef struct { ParserNode *lhs; ParserNode *rhs; } Node_Assign;
 typedef struct { ParserNode **elems; size_t count; ParserNode *length_expr; } Node_ArrayLiteral;
 typedef struct { BinaryOpType type; ParserNode *lhs; ParserNode *rhs; } Node_BinaryOp;
@@ -89,8 +89,8 @@ struct ParserNode {
         double real_value;
         intptr_t int_value;
         b8 bool_value;
-        InternedStr identifier;
         String string;
+        InternedStr identifier;
         Node_Block block;
         Node_FuncDecl func_decl;
         Node_FuncCall func_call;
@@ -317,7 +317,7 @@ static ParserNode *parse_expr_prec(Parser *p, Precedence prec);
 
 static ParserNode *parse_number(Parser *p);
 static ParserNode *parse_string(Parser *p);
-static ParserNode *parse_ident(Parser *p);
+static ParserNode *parse_identifier(Parser *p);
 static ParserNode *parse_grouping(Parser *p);
 static ParserNode *parse_call(Parser *p, ParserNode *lhs);
 static ParserNode *parse_binary(Parser *p, ParserNode *lhs);
@@ -338,8 +338,8 @@ static ParseRule rules[T_COUNT] = {
     // ----- Terminals (literals and primaries)
     [T_NUM] = {parse_number, NULL, PREC_NONE},
     [T_STRING] = {parse_string, NULL, PREC_NONE},
-    //[T_IDENT] = {parse_ident, NULL, PREC_NONE},
-    [T_IDENT] = {parse_ident, NULL, PREC_NONE},
+    //[T_IDENT] = {parse_identifier, NULL, PREC_NONE},
+    [T_IDENT] = {parse_identifier, NULL, PREC_NONE},
     //  [T_TRUE]       = { parse_bool,      NULL,         PREC_NONE },
     //  [T_FALSE]      = { parse_bool,      NULL,         PREC_NONE },
     [T_NIL] = {parse_nil, NULL, PREC_NONE},
@@ -400,10 +400,9 @@ static ParseRule rules[T_COUNT] = {
 //-                        | func_decl 
 //-                        | main_block
 //- 
-static void parse_program(Parser *p) {
+void parse_program(Parser *p) {
     PRINT_FUNC_NAME;
     print(S("{\n\n"));
-
     ParserNode *program = new_node(p, NODE_BLOCK);
 
     while (peek(p)->type != T_END) {
@@ -436,23 +435,17 @@ static void parse_program(Parser *p) {
 static ParserNode *parse_const_var_decl(Parser *p, TokenType type) {
     PRINT_FUNC_NAME;
 
-    Token *ident = expect(p, T_IDENT, "Variable or constant declaration must have a valid identifier on left-hand side.");
-    expect(p, T_EQUALS, "Variables must be initialised upon declaration. TODO remove"); // TODO
+    assert(type == T_VAR || type == T_CONST);
 
-    ParserNode *rhs = parse_expr(p);
-    ParserNode *node = NULL;
-
-    if (type == T_VAR) {
-        node = new_node(p, NODE_VAR_DECL);
-        node->const_var_decl.identifier = str_intern(p, ident);
-        node->const_var_decl.rhs = rhs;
-    } else if (type == T_CONST) {
-        node = new_node(p, NODE_CONST_DECL);
-        node->const_var_decl.identifier = str_intern(p, ident);
-        node->const_var_decl.rhs = rhs;
-    } else {
-        assert(0);
-    }
+    ParserNode *node = new_node(p, (type == T_VAR) ? NODE_VAR_DECL : NODE_CONST_DECL);
+    advance(p);
+    ParserNode *identifier = parse_identifier(p);
+    
+    ParserNode *rhs = NULL;
+    if (match(p, T_EQUALS)) rhs = parse_expr(p);
+    
+    node->const_var_decl.identifier = identifier;
+    node->const_var_decl.rhs = rhs;
 
     return node;
 }
@@ -749,7 +742,7 @@ static ParserNode *make_multi_assign(Parser *p,
     return node;
 }
 
-static ParserNode *parse_ident(Parser *p) {
+static ParserNode *parse_identifier(Parser *p) {
     PRINT_FUNC_NAME;
 
     ParserNode *node = new_node(p, NODE_IDENTIFIER);
@@ -762,7 +755,7 @@ static ParserNode *parse_ident(Parser *p) {
 static ParserNode *parse_for_expr(Parser *p) {
     PRINT_FUNC_NAME;
     //expect(p, T_FOR, "FOR EXPECTED");
-    ParserNode *ident = parse_ident(p); 
+    ParserNode *ident = parse_identifier(p); 
     advance(p); // Due to pratt parser need to advance/consume token
     expect(p, T_IN, "'in' must follow the iterator variable before enumeratable.");
     ParserNode *iter_expr = parse_expr(p);

@@ -17,7 +17,7 @@
     \
     X(VAR) X(CONST) X(IMPORT) X(CFFI) X(FUNC) X(TRUE) X(FALSE) X(RETURN) \
     X(IF) X(ELSE) X(CASE) X(MAIN) X(FOR) X(IN) \
-    X(STRUCT) X(NIL) X(TYPE) X(CAST) X(REF) \
+    X(STRUCT) X(NIL) X(TYPE) X(REF) \
     \
     X(EQUALS_RARROW) \
     X(CT_DIRECTIVE) \
@@ -100,7 +100,6 @@ static TokenType keyword_or_identifier(char *str, size_t n) {
     if (n==3 && !memcmp(str, "nil", 3))     return T_NIL;
     if (n==3 && !memcmp(str, "for", 3))     return T_FOR;
     if (n==2 && !memcmp(str, "in", 2))      return T_IN;
-    if (n==4 && !memcmp(str, "cast", 4))    return T_CAST;
     if (n==3 && !memcmp(str, "ref", 3))     return T_REF;
     if (n==3 && !memcmp(str, "var", 3))     return T_VAR;
     if (n==5 && !memcmp(str, "const", 5))   return T_CONST;
