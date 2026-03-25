@@ -567,10 +567,6 @@ static ParserNode *parse_expr_prec(Parser *p, Precedence prec) {
     return lhs;
 }
 
-static void parse_cffi_func_decl(Parser *p);
-static void parse_cffi_struct_decl(Parser *p);
-
-
 static void dump_parser_state(Parser *p) {
     printf("pos=%u, nodes=%u, statements=%u, errors=%u\n",
         p->pos, p->node_count, p->statement_count, p->error_count);
@@ -692,10 +688,6 @@ static bool is_expr_start(TokenType type) {
     }
 }
 
-static ParserNode *parse_bare_call(Parser *p, ParserNode *lhs);
-static int collect_lhs_tuple(Parser *p, ParserNode *first, ParserNode **targets);
-static int collect_rhs_tuple(Parser *p, ParserNode **values);
-
 /*
 Note the asymmetry — collect_lhs_tuple takes the already-parsed first node
 because your statement parser will have consumed it before knowing a comma
@@ -744,8 +736,6 @@ int collect_rhs_tuple(Parser *p, ParserNode **values) {
     values = nodes;
     return len;
 }
-
-static ParserNode *new_node(Parser *p, ParserNodeKind kind);
 
 static ParserNode *make_multi_assign(Parser *p,
                                      ParserNode **targets, int target_count,
@@ -871,11 +861,6 @@ static ParserNode *parse_block(Parser *p, TokenType block_end) {
     return block;
 }
 
-
-
-
-
-
 static ParserNode *parse_binary(Parser *p, ParserNode *lhs) {
     PRINT_FUNC_NAME;
 
@@ -902,8 +887,6 @@ static ParserNode *parse_assign(Parser *p, ParserNode *lhs) {
 
     return node;
 }
-
-static ParserNode *parse_if_expr(Parser *p);
 
 static ParserNode *parse_string(Parser *p) {
     PRINT_FUNC_NAME;
