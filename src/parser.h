@@ -2,9 +2,10 @@
 
 /*
 
-
-//- We will define the grammar so that it is searchable
+//-
+//- We will define the EBNF grammar so that it is searchable
 //- Each grammar definition starts with '//-' so these are easy to grep
+//- e.g. `grep //- src/parser.h`
 //-
 
 */
@@ -218,10 +219,10 @@ typedef enum {
     PREC_COMMA,
     PREC_ASSIGN,
     PREC_TERNARY,
+    PREC_RANGE,
     PREC_OR,
     PREC_AND,
     PREC_CMP,
-    PREC_RANGE,
     PREC_TERM,
     PREC_FACTOR,
     PREC_UNARY,
@@ -242,8 +243,9 @@ typedef struct {
     Precedence precedence;
 } ParseRule;
 
-static Token *peek(Parser *p) { return &p->tokens[p->pos]; }
+///// Utility functions for the parser
 
+static Token *peek(Parser *p) { return &p->tokens[p->pos]; }
 static Token *advance(Parser *p) { return &p->tokens[p->pos++]; }
 
 static int match(Parser *p, TokenType t) {
@@ -322,12 +324,52 @@ static ParserNode *new_node(Parser *p, ParserNodeKind kind) {
     return node;
 }
 
+static void dump_parser_state(Parser *p) {
+    printf("pos=%u, nodes=%u, statements=%u, errors=%u\n",
+        p->pos, p->node_count, p->statement_count, p->error_count);
+    printf("next token: %s\n", token_type_strings[peek(p)->type].data);
+}
+
+// TODO is this needed? used originally for the idea of function calls without parentheses
+static bool is_expr_start(TokenType type) {
+    switch (type) {
+        case T_IDENT:
+        case T_NUM:
+        case T_STRING:
+        case T_TRUE:
+        case T_FALSE:
+        case T_NIL:
+
+        // unary operators TODO review if unary plus added
+        case T_MINUS:
+        case T_NOT:
+
+        // grouping / collections
+        case T_LPAREN:
+        case T_LSQBRACKET:  // array literal
+        case T_LBRACE:      // block/map literal
+
+        // keywords that produce values
+        case T_IF:          // if as expression
+        //case T_CAST:
+            return true;
+
+        default:
+            return false;
+    }
+}
+
+static void skip_newlines(Parser *p) {
+    while (current(p)->type == T_NEWLINE)
+        advance(p);
+}
+
+///// Forward declarations for the recursive descent and Pratt parser functions
+
 static ParserNode *parse_stmt(Parser *p);
 static ParserNode *parse_expr(Parser *p);
 static ParserNode *parse_block(Parser *p, TokenType block_end);
-static Param parse_param(Parser *p);
 static ParserNode *parse_expr_prec(Parser *p, Precedence prec);
-
 static ParserNode *parse_number(Parser *p);
 static ParserNode *parse_string(Parser *p);
 static ParserNode *parse_identifier(Parser *p);
@@ -346,8 +388,21 @@ static ParserNode *parse_if_expr(Parser *p);
 static ParserNode *parse_for_expr(Parser *p);
 static ParserNode *parse_ternary(Parser *p, ParserNode *lhs);
 static ParserNode *parse_comma(Parser *p, ParserNode *lhs);
+static void parse_primary(Parser *p);
+static Param parse_param(Parser *p);
+static int collect_lhs_tuple(Parser *p, ParserNode *first, ParserNode **targets);
+static int collect_rhs_tuple(Parser *p, ParserNode **values);
+static ParserNode *make_multi_assign(Parser *p,
+                                     ParserNode **targets, int target_count,
+                                     ParserNode **values, int value_count);
+static void parse_struct_init(Parser *p);
+static ParserNode *parse_return(Parser *p);
+
+///// Rule table for the Pratt Parser
 
 static ParseRule rules[T_COUNT] = {
+// TODO cleanup order of the table for precedence instead of categories
+// TODO possibly refactor this table into a switch statement 
     // ----- Terminals (literals and primaries)
     [T_NUM] = {parse_number, NULL, PREC_NONE},
     [T_STRING] = {parse_string, NULL, PREC_NONE},
@@ -407,6 +462,8 @@ static ParseRule rules[T_COUNT] = {
     // T_RBRACE and others to catch errors instead of segfault
 };
 
+//- ----- START OF GRAMMAR -----
+//-
 //- program                = { top_level_declaration }
 //- top_level_declaration  = const_decl
 //-                        | var_decl
@@ -561,125 +618,30 @@ static ParserNode *parse_expr_prec(Parser *p, Precedence prec) {
     return lhs;
 }
 
-static void dump_parser_state(Parser *p) {
-    printf("pos=%u, nodes=%u, statements=%u, errors=%u\n",
-        p->pos, p->node_count, p->statement_count, p->error_count);
-    printf("next token: %s\n", token_type_strings[peek(p)->type].data);
+//- assignment             = tuple_assign
+//-
+static ParserNode *parse_assign(Parser *p, ParserNode *lhs) {
+    PRINT_FUNC_NAME;
+    ParserNode *node = new_node(p, NODE_ASSIGNMENT);
+    node->assign.lhs = lhs;
+    node->assign.rhs = parse_expr_prec(p, PREC_LOWEST);
+
+    return node;
 }
 
-static void parse_primary(Parser *p) {
+//- tuple_assign           = lvalue_list, "=", expr_list
+//- lvalue_list            = lvalue, {",", lvalue}
+//- expr_list              = expr, {",", expr}
+//- lvalue                 = identifier | index_expr | dot_expr
+//-
+static ParserNode *parse_comma(Parser *p, ParserNode *lhs) {
     PRINT_FUNC_NAME;
 
-    Token *t = peek(p);
-    print(S("parse_primary Token type: "));
-    print(token_type_strings[t->type]);
-    print_char('\n');
-
-    switch (t->type) {
-    case T_NUM:
-    case T_IDENT:
-    case T_STRING:
-    case T_NIL:
-    case T_TRUE:
-    case T_FALSE:
-        advance(p);
-        break;
-
-    case T_LPAREN: {
-        advance(p);
-        parse_expr(p);
-        expect(p, T_RPAREN, "");
-    } break;
-
-    default: {
-        raise_error(p, "Primary incorrect. Oops. Expected expression.");
-    } break;
-    }
-}
-
-static void parse_struct_init(Parser *p) {
-    PRINT_FUNC_NAME;
-    expect(p, T_LBRACE, "");
-
-    if (!match(p, T_RBRACE)) {
-        do {
-            if (peek(p)->type == T_NEWLINE)
-                expect(p, T_NEWLINE, "");
-            expect(p, T_DOT, "");
-            expect(p, T_IDENT, "");
-            expect(p, T_EQUALS, "");
-            parse_expr(p);
-            expect(p, T_COMMA, ""); // Optional for last so different than
-                                    // function calls/definitions
-            if (peek(p)->type == T_NEWLINE)
-                expect(p, T_NEWLINE, "");
-        } while (!match(p, T_RBRACE));
-    }
-}
-
-static void parse_postfix(Parser *p) {
-    PRINT_FUNC_NAME;
-
-    parse_primary(p);
-
-    for (;;) {
-        // Function call
-        if (peek(p)->type == T_LPAREN) {
-            advance(p);
-
-            if (peek(p)->type != T_RPAREN) {
-                do {
-                    parse_expr(p);
-                } while (match(p, T_COMMA));
-            }
-
-            expect(p, T_RPAREN, "");
-            continue;
-        }
-
-        // Member access
-        if (peek(p)->type == T_DOT) {
-            advance(p); // consume .
-            expect(p, T_IDENT, "");
-            continue;
-        }
-
-        if (peek(p)->type == T_LBRACE) {
-            parse_struct_init(p);
-            continue;
-        }
-
-        break;
-    }
-}
-
-static bool is_expr_start(TokenType type) {
-    switch (type) {
-        case T_IDENT:
-        case T_NUM:
-        case T_STRING:
-        case T_TRUE:
-        case T_FALSE:
-        case T_NIL:
-
-        // unary operators (no unary plus atm)
-        case T_MINUS:
-        case T_NOT:
-        //case T_AMPERSAND:   // address-of
-
-        // grouping / collections
-        case T_LPAREN:
-        case T_LSQBRACKET:  // array literal
-        case T_LBRACE:      // block/map literal
-
-        // keywords that produce values
-        case T_IF:          // if as expression
-        //case T_CAST:
-            return true;
-
-        default:
-            return false;
-    }
+    ParserNode **targets, **values;
+    int target_count = collect_lhs_tuple(p, lhs, targets);
+    expect(p, T_EQUALS, "Multiple values with comma should have assignment.");
+    int value_count = collect_rhs_tuple(p, values);
+    return make_multi_assign(p, targets, target_count, values, value_count);
 }
 
 /*
@@ -688,7 +650,7 @@ because your statement parser will have consumed it before knowing a comma
 was coming, whereas collect_rhs_tuple starts fresh after the =.
 */
 
-int collect_lhs_tuple(Parser *p, ParserNode *first, ParserNode **targets) {
+static int collect_lhs_tuple(Parser *p, ParserNode *first, ParserNode **targets) {
     PRINT_FUNC_NAME;
 
     ParserNode **nodes = new(p->arena, ParserNode*, 1);
@@ -713,7 +675,7 @@ int collect_lhs_tuple(Parser *p, ParserNode *first, ParserNode **targets) {
     return len;
 }
 
-int collect_rhs_tuple(Parser *p, ParserNode **values) {
+static int collect_rhs_tuple(Parser *p, ParserNode **values) {
     PRINT_FUNC_NAME;
 
     ParserNode **nodes = new(p->arena, ParserNode*, 1);
@@ -747,100 +709,46 @@ static ParserNode *make_multi_assign(Parser *p,
     return node;
 }
 
-static ParserNode *parse_identifier(Parser *p) {
+//- ternary                = range , [ "?" , expr , ":" , ternary ]
+//-
+static ParserNode *parse_ternary(Parser *p, ParserNode *lhs) {
     PRINT_FUNC_NAME;
 
-    ParserNode *node = new_node(p, NODE_IDENTIFIER);
-    Token *tok = previous(p);
-    node->identifier = str_intern(p, tok);
+    // TODO check that this is properly right-associative?
+
+    ParserNode *node = new_node(p, NODE_TERNARY);
+
+    node->ternary.cond = lhs;  
+    node->ternary.then_expr = parse_expr(p);
+    expect(p, T_COLON, "Expected colon after then expression");
+    node->ternary.else_expr = parse_expr_prec(p, PREC_TERNARY);
 
     return node;
 }
 
-static ParserNode *parse_for_expr(Parser *p) {
+// TODO @Cleanup check for cases where a..b&&c..d (possibly this should be a parse error?)
+// TODO @Cleanup consider the case where we force parens instead of having OR lower than AND?
+// Essentially replacing `or` below with `logical_expr`?
+// e.g. logical_expr = and_expr | or_expr | comparison
+//- range                  = or, [ (".." | "..="), or ]
+//-
+static ParserNode *parse_range(Parser *p, ParserNode *lhs) {
     PRINT_FUNC_NAME;
-    //expect(p, T_FOR, "FOR EXPECTED");
-    ParserNode *ident = parse_identifier(p); 
-    advance(p); // Due to pratt parser need to advance/consume token
-    expect(p, T_IN, "'in' must follow the iterator variable before enumeratable.");
-    ParserNode *iter_expr = parse_expr(p);
-    expect(p, T_LBRACE, "Expected '{' after for condition");    
-    ParserNode *body = parse_block(p, T_RBRACE);
 
-    ParserNode *node = new_node(p, NODE_FOR_EXPR);
-    node->for_expr.ident = ident;
-    node->for_expr.iter_expr = iter_expr;
+    ParserNode *node = new_node(p, NODE_RANGE);
+    node->range.lhs = lhs;
+    node->range.inclusive = (previous(p)->type == T_DOTDOTEQ);
+    node->range.rhs = parse_expr_prec(p, PREC_RANGE);
     return node;
 }
 
-static ParserNode *parse_return(Parser *p) {
-    PRINT_FUNC_NAME;
-    
-    ParserNode *ret = new_node(p, NODE_RETURN);
-    ParserNode *expr = parse_expr(p);
-    ret->ret.expr = expr;
-
-    return ret;
-}
-
-static ParserNode *parse_stmt(Parser *p) {
-    PRINT_FUNC_NAME;
-
-    //if (match(p, T_FOR))    return parse_for_stmt(p);
-    if (match(p, T_RETURN)) return parse_return(p);
-    if (match(p, T_FUNC))   return parse_func_decl(p);
-    if (match(p, T_MAIN))   return parse_main_decl(p);
-    if (match(p, T_VAR))    return parse_const_var_decl(p, T_VAR);
-    if (match(p, T_CONST))  return parse_const_var_decl(p, T_CONST);
-    else                    return parse_expr(p);
-}
-
-static ParserNode *parse_number(Parser *p) {
-    ParserNode *node = new_node(p, NODE_NUMBER);
-
-    Token *tok = previous(p);
-    char *start = p->source.data + tok->start;
-    bool ok = false;
-
-    if (memchr(start, '.', tok->length)) {
-        ok = string_to_double((String){.data = start, .len = tok->length}, &node->real_value);
-    } else {
-        ok = string_to_int64((String){.data = start, .len = tok->length}, &node->int_value);
-    }
-
-    if (!ok) {
-        raise_error(p, "Number provided is invalid.");
-    }
-
-    return node;
-}
-
-static ParserNode *parse_block(Parser *p, TokenType block_end) {
-    PRINT_FUNC_NAME;
-    ParserNode *block = new_node(p, NODE_BLOCK);
-
-    // while (peek(p)->type != T_END) {
-    while (peek(p)->type != block_end) {
-        if (match(p, T_NEWLINE) || match(p, T_SEMICOLON))
-            continue;
-        ParserNode *stmt = parse_stmt(p);
-        block_add_stmt(p, &block->block, stmt);
-
-        if (match(p, T_NEWLINE) || match(p, T_SEMICOLON))
-            continue;
-
-        if (peek(p)->type == block_end)
-            break;
-
-        // Parse error here, statement expects newline or END
-        raise_error(p, "No newline at end of statement\n");
-    }
-
-    expect(p, block_end, "Expected closing token");
-
-    return block;
-}
-
+// TODO logical ops
+//- or                     = and , { "||" , and } ;
+//- and                    = comparison , { "&&" , comparison } ;
+//- comparison             = term, { ("==" | "!=" | "<" | ">" | "<=" | ">="), term }
+//- term                   = factor, { ("+", "-"), factor }
+//- factor                 = unary, {("*" | "/"), factor }
+//-
 static ParserNode *parse_binary(Parser *p, ParserNode *lhs) {
     PRINT_FUNC_NAME;
 
@@ -851,37 +759,88 @@ static ParserNode *parse_binary(Parser *p, ParserNode *lhs) {
 
     return node;
 }
+//- factor                 = unary, {("*" | "/"), factor }
 
-static ParserNode *parse_assign(Parser *p, ParserNode *lhs) {
-    PRINT_FUNC_NAME;
-    ParserNode *node = new_node(p, NODE_ASSIGNMENT);
-    node->assign.lhs = lhs;
-    node->assign.rhs = parse_expr_prec(p, PREC_LOWEST);
-
+// TODO "+"?
+//- unary                  = ("-" | "!"), unary
+//-                        | postfix
+//-
+static ParserNode *parse_unary(Parser *p) {
+    ParserNode *node = new_node(p, NODE_UNARY);
+    node->unary.op = previous(p)->type;
+    node->unary.expr = parse_expr_prec(p, PREC_UNARY);
     return node;
 }
 
-static ParserNode *parse_string(Parser *p) {
+//- postfix                = primary, {postfix_op}
+//- postfix_op             = call_op | index_op | dot_op
+//-
+static void parse_postfix(Parser *p) {
     PRINT_FUNC_NAME;
 
-    ParserNode *node = new_node(p, NODE_STRING);
-    node->string = token_string(p, previous(p));
-    return node;
+    parse_primary(p);
+
+    for (;;) {
+        // Function call
+        if (peek(p)->type == T_LPAREN) {
+            advance(p);
+
+            if (peek(p)->type != T_RPAREN) {
+                do {
+                    parse_expr(p);
+                } while (match(p, T_COMMA));
+            }
+
+            expect(p, T_RPAREN, "");
+            continue;
+        }
+
+        // Member access
+        if (peek(p)->type == T_DOT) {
+            assert(0); // @Cleanup not added properly to AST
+
+            advance(p); // consume .
+            expect(p, T_IDENT, "");
+            continue;
+        }
+
+        if (peek(p)->type == T_LBRACE) {
+            assert(0); // @Cleanup not added properly to AST
+
+            parse_struct_init(p);
+            continue;
+        }
+
+        break;
+    }
 }
 
-static ParserNode *parse_nil(Parser *p) {
+// TODO how does this fit into precedence or use of {}?
+static void parse_struct_init(Parser *p) {
     PRINT_FUNC_NAME;
-    return new_node(p, NODE_NIL);
+    assert(0); // @Cleanup to be implemented
+    expect(p, T_LBRACE, "");
+
+    if (!match(p, T_RBRACE)) {
+        do {
+            if (peek(p)->type == T_NEWLINE)
+                expect(p, T_NEWLINE, "");
+            expect(p, T_DOT, "");
+            expect(p, T_IDENT, "");
+            expect(p, T_EQUALS, "");
+            parse_expr(p);
+            expect(p, T_COMMA, ""); // Optional for last so different than
+                                    // function calls/definitions
+            if (peek(p)->type == T_NEWLINE)
+                expect(p, T_NEWLINE, "");
+        } while (!match(p, T_RBRACE));
+    }
 }
 
-static ParserNode *parse_grouping(Parser *p) {
-    PRINT_FUNC_NAME;
-
-    ParserNode *expr = parse_expr(p);
-    expect(p, T_RPAREN, "Expected ')' after grouped expression.");
-    return expr;
-}
-
+// TODO review ambiguity here with regular grouping?
+//- call_op                = "(" , [ arg_list ] , ")" ;
+//- arg_list               = expr , { "," , expr } ;
+//- 
 static ParserNode *parse_call(Parser *p, ParserNode *lhs) {
     PRINT_FUNC_NAME;
 
@@ -906,6 +865,130 @@ static ParserNode *parse_call(Parser *p, ParserNode *lhs) {
     return node;
 }
 
+
+//- index_op               = "[", expr, "]"
+//- index_expr             = postfix (* alias used in lvalue *)
+//-
+static ParserNode *parse_index(Parser *p, ParserNode *lhs) {
+    PRINT_FUNC_NAME;
+
+    ParserNode *node = new_node(p, NODE_INDEX);
+    node->index.base = lhs;
+    node->index.index = parse_expr_prec(p, PREC_LOWEST);
+    expect(p, T_RSQBRACKET, "Expected ']' after index.");
+    return node;
+}
+
+// TODO should this be expression?
+//- dot_op                 = ".", identifer 
+//- index_expr             = postfix (* alias used in lvalue *)
+//-
+static ParserNode *parse_dot(Parser *p, ParserNode *lhs) {
+    PRINT_FUNC_NAME;
+
+    ParserNode *node = new_node(p, NODE_DOT_ACCESS);
+    node->dot_access.lhs = lhs;
+
+    Token *member = expect(p, T_IDENT, "Expected member name after '.'.");
+    node->dot_access.member = member;
+    return node;
+}
+
+//- primary                = number_lit | string_lit | nil | bool_lit
+//-                        | identifier
+//-                        | "(", expr, ")"
+//-
+static void parse_primary(Parser *p) {
+    PRINT_FUNC_NAME;
+
+    Token *t = peek(p);
+    print(S("parse_primary Token type: "));
+    print(token_type_strings[t->type]);
+    print_char('\n');
+
+    switch (t->type) {
+        case T_NUM:
+        case T_IDENT:
+        case T_STRING:
+        case T_NIL:
+        case T_TRUE:
+        case T_FALSE:
+            advance(p);
+            break;
+
+        case T_LPAREN: {
+            advance(p);
+            parse_expr(p);
+            expect(p, T_RPAREN, "");
+        } break;
+
+        default: {
+            raise_error(p, "Primary incorrect. Oops. Expected expression.");
+        } break;
+    }
+}
+
+static ParserNode *parse_grouping(Parser *p) {
+    PRINT_FUNC_NAME;
+
+    ParserNode *expr = parse_expr(p);
+    expect(p, T_RPAREN, "Expected ')' after grouped expression.");
+    return expr;
+}
+
+// TODO review floats with .5 and 0.5 and 5.
+//- (* Literals *)
+//- number_lit             = integer_lit | float_lit
+//- integer_lit            = digits | ("0x", hex_digit, {hex_digit})
+//- float_lit              = {digits, ".", digits} | {digits, "."} | {".", digits}
+
+static ParserNode *parse_number(Parser *p) {
+    ParserNode *node = new_node(p, NODE_NUMBER);
+
+    Token *tok = previous(p);
+    char *start = p->source.data + tok->start;
+    bool ok = false;
+
+    if (memchr(start, '.', tok->length)) {
+        ok = string_to_double((String){.data = start, .len = tok->length}, &node->real_value);
+    } else {
+        ok = string_to_int64((String){.data = start, .len = tok->length}, &node->int_value);
+    }
+
+    if (!ok) {
+        raise_error(p, "Number provided is invalid.");
+    }
+
+    return node;
+}
+
+//- string_lit             = '"', {str_char}, '"'
+static ParserNode *parse_string(Parser *p) {
+    PRINT_FUNC_NAME;
+
+    ParserNode *node = new_node(p, NODE_STRING);
+    node->string = token_string(p, previous(p));
+    return node;
+}
+
+//- nil                    = "nil"
+static ParserNode *parse_nil(Parser *p) {
+    PRINT_FUNC_NAME;
+    return new_node(p, NODE_NIL);
+}
+
+//- bool_lit               = "true" | "false"
+//- 
+static ParserNode *parse_bool(Parser *p) {
+    PRINT_FUNC_NAME;
+    ParserNode *node = new_node(p, NODE_BOOL);
+    node->bool_value = previous(p)->type == T_TRUE;
+    return node;
+}
+
+//- array_lit              = "[", expr, ";", expr, "]"   (* repeat form:  [0; width*height] *)
+//-                        | "[" , [expr_list] , "]"     (* element form: [1, 2, 3] *)
+//-
 static ParserNode *parse_array_lit(Parser *p) {
     PRINT_FUNC_NAME;
 
@@ -939,81 +1022,9 @@ static ParserNode *parse_array_lit(Parser *p) {
     return node;
 }
 
-static ParserNode *parse_index(Parser *p, ParserNode *lhs) {
-    PRINT_FUNC_NAME;
-
-    ParserNode *node = new_node(p, NODE_INDEX);
-    node->index.base = lhs;
-    node->index.index = parse_expr_prec(p, PREC_LOWEST);
-    expect(p, T_RSQBRACKET, "Expected ']' after index.");
-    return node;
-}
-
-static ParserNode *parse_range(Parser *p, ParserNode *lhs) {
-    PRINT_FUNC_NAME;
-
-    ParserNode *node = new_node(p, NODE_RANGE);
-    node->range.lhs = lhs;
-    node->range.inclusive = (previous(p)->type == T_DOTDOTEQ);
-    node->range.rhs = parse_expr_prec(p, PREC_RANGE);
-    return node;
-}
-
-static ParserNode *parse_dot(Parser *p, ParserNode *lhs) {
-    PRINT_FUNC_NAME;
-
-    ParserNode *node = new_node(p, NODE_DOT_ACCESS);
-    node->dot_access.lhs = lhs;
-
-    Token *member = expect(p, T_IDENT, "Expected member name after '.'.");
-    node->dot_access.member = member;
-    return node;
-}
-
-static ParserNode *parse_unary(Parser *p) {
-    ParserNode *node = new_node(p, NODE_UNARY);
-    node->unary.op = previous(p)->type;
-    node->unary.expr = parse_expr_prec(p, PREC_UNARY);
-    return node;
-}
-
-static ParserNode *parse_bool(Parser *p) {
-    PRINT_FUNC_NAME;
-    ParserNode *node = new_node(p, NODE_BOOL);
-    node->bool_value = previous(p)->type == T_TRUE;
-    return node;
-}
-
-static ParserNode *parse_ternary(Parser *p, ParserNode *lhs) {
-    PRINT_FUNC_NAME;
-
-    // TODO check that this is properly right-associative?
-
-    ParserNode *node = new_node(p, NODE_TERNARY);
-
-    node->ternary.cond = lhs;  
-    node->ternary.then_expr = parse_expr(p);
-    expect(p, T_COLON, "Expected colon after then expression");
-    node->ternary.else_expr = parse_expr_prec(p, PREC_TERNARY);
-
-    return node;
-}
-
-static ParserNode *parse_comma(Parser *p, ParserNode *lhs) {
-    PRINT_FUNC_NAME;
-
-    ParserNode **targets, **values;
-    int target_count = collect_lhs_tuple(p, lhs, targets);
-    expect(p, T_EQUALS, "Multiple values with comma should have assignment.");
-    int value_count = collect_rhs_tuple(p, values);
-    return make_multi_assign(p, targets, target_count, values, value_count);
-}
-
-static void skip_newlines(Parser *p) {
-    while (current(p)->type == T_NEWLINE)
-        advance(p);
-}
-
+//- (* Control flow expressions *)
+// TODO review case of "if (expr) then_stmt"
+//- if_expr                = "if", expr, block, ["else", (if_expr | block)]
 static ParserNode *parse_if_expr(Parser *p) {
     PRINT_FUNC_NAME;
     ParserNode *cond = parse_expr(p);
@@ -1048,4 +1059,113 @@ static ParserNode *parse_if_expr(Parser *p) {
     node->if_expr.else_branch = else_branch;
     return node;
 }
+
+// TODO this is ambiguous or rather the for_in should be moved up, productions are different
+//- for_expr               = ("for", expr, block) | ("for", identifier, "in", expr, block)
+//-
+static ParserNode *parse_for_expr(Parser *p) {
+    PRINT_FUNC_NAME;
+    //expect(p, T_FOR, "FOR EXPECTED");
+    ParserNode *ident = parse_identifier(p); 
+    advance(p); // Due to pratt parser need to advance/consume token
+    expect(p, T_IN, "'in' must follow the iterator variable before enumeratable.");
+    ParserNode *iter_expr = parse_expr(p);
+    expect(p, T_LBRACE, "Expected '{' after for condition");    
+    ParserNode *body = parse_block(p, T_RBRACE);
+
+    ParserNode *node = new_node(p, NODE_FOR_EXPR);
+    node->for_expr.ident = ident;
+    node->for_expr.iter_expr = iter_expr;
+    return node;
+}
+
+//- (* Terminals *)
+//- identifier             = letter , { letter | digit | "_" } ;
+static ParserNode *parse_identifier(Parser *p) {
+    PRINT_FUNC_NAME;
+
+    ParserNode *node = new_node(p, NODE_IDENTIFIER);
+    Token *tok = previous(p);
+    node->identifier = str_intern(p, tok);
+
+    return node;
+}
+//- letter                 = "a" ... "z" | "A" ... "Z" | "_" ;
+//- digit                  = "0" ... "9" ;
+//- hex_digit              = digit | "a" ... "f" | "A" ... "F" ;
+//- str_char               = any_char_except_double_quote_or_newline ;
+//- newline                = "\n" | "\r\n" ;
+//- 
+
+
+//- (* Statements *)
+//- statement              = shebang
+//-                        | var_decl
+//-                        | const_decl
+//-                        | func_decl
+//-                        | main_block
+//-                        | return_stmt
+//-                        | expr_stmt
+static ParserNode *parse_stmt(Parser *p) {
+    PRINT_FUNC_NAME;
+
+    //if (match(p, T_FOR))    return parse_for_stmt(p);
+    if (match(p, T_RETURN)) return parse_return(p);
+    if (match(p, T_FUNC))   return parse_func_decl(p);
+    if (match(p, T_MAIN))   return parse_main_decl(p);
+    if (match(p, T_VAR))    return parse_const_var_decl(p, T_VAR);
+    if (match(p, T_CONST))  return parse_const_var_decl(p, T_CONST);
+    else                    return parse_expr(p);
+}
+
+//- return_stmt            = "return" , [expr]
+//-
+static ParserNode *parse_return(Parser *p) {
+    PRINT_FUNC_NAME;
+    
+    ParserNode *ret = new_node(p, NODE_RETURN);
+    ParserNode *expr = parse_expr(p);
+    ret->ret.expr = expr;
+
+    return ret;
+}
+
+
+
+//- (* Blocks *)
+//- block                  = "{" , { statement | newline } , "}" ;
+//- 
+static ParserNode *parse_block(Parser *p, TokenType block_end) {
+    PRINT_FUNC_NAME;
+    ParserNode *block = new_node(p, NODE_BLOCK);
+
+    // while (peek(p)->type != T_END) {
+    while (peek(p)->type != block_end) {
+        if (match(p, T_NEWLINE) || match(p, T_SEMICOLON))
+            continue;
+        ParserNode *stmt = parse_stmt(p);
+        block_add_stmt(p, &block->block, stmt);
+
+        if (match(p, T_NEWLINE) || match(p, T_SEMICOLON))
+            continue;
+
+        if (peek(p)->type == block_end)
+            break;
+
+        // Parse error here, statement expects newline or END
+        raise_error(p, "No newline at end of statement\n");
+    }
+
+    expect(p, block_end, "Expected closing token");
+
+    return block;
+}
+
+//- ----- END OF GRAMMAR -----
+//-
+
+
+
+
+
 
