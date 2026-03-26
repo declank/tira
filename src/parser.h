@@ -287,8 +287,10 @@ static Token *expect(Parser *p, TokenType type, const char *msg) {
     return advance(p);
 }
 
-static void block_add_stmt(ParserNode *block, ParserNode *stmt) {
+static void block_add_stmt(Parser *p, ParserNode *block, ParserNode *stmt) {
     // TODO
+    block->block.stmts = realloc_array(p->arena, block->block.stmts, ParserNode*, block->block.count + 1);
+    block->block.stmts[block->block.count++] = stmt;
 }
 
 static ParserNode *new_node(Parser *p, ParserNodeKind kind) {
@@ -410,7 +412,7 @@ void parse_program(Parser *p) {
             continue;
         
         ParserNode *stmt = parse_stmt(p);
-        block_add_stmt(program, stmt);
+        block_add_stmt(p, program, stmt);
 
         //getchar();
 
@@ -455,7 +457,9 @@ static ParserNode *parse_const_var_decl(Parser *p, TokenType type) {
 static ParserNode *parse_func_decl(Parser *p) {
     PRINT_FUNC_NAME;
 
-    Token* ident = expect(p, T_IDENT, "Function name must follow 'func'");
+    ParserNode *node = new_node(p, NODE_FUNC_DECL);
+    ParserNode *identifier = parse_identifier(p);
+    //Token* ident = expect(p, T_IDENT, "Function name must follow 'func'");
 
     TypeParam *type_params = NULL;
     size_t type_params_count = 0;
@@ -474,8 +478,7 @@ static ParserNode *parse_func_decl(Parser *p) {
         expect(p, T_RPAREN, "Expected ')' after arguments.");
     }
 
-    ParserNode *node = new_node(p, NODE_FUNC_DECL);
-    node->func_decl.identifier = str_intern(p, ident);
+    node->func_decl.identifier = str_intern(p, previous(p));
     node->func_decl.params = params;
     node->func_decl.param_count = params_count;
 
@@ -490,7 +493,11 @@ static ParserNode *parse_func_decl(Parser *p) {
 static ParserNode *parse_main_decl(Parser *p) {
     PRINT_FUNC_NAME;
 
-    ParserNode *node = new_node(p, NODE_FUNC_DECL);
+    assert(p->pos > 0);
+    //p->pos--;
+    return parse_func_decl(p);
+
+/*     ParserNode *node = new_node(p, NODE_FUNC_DECL);
 
     // Hacky way of saving "main" keyword also as the function name, later we will implement "main" as a macro instead of keyword
     Token* main = current(p);
@@ -503,7 +510,7 @@ static ParserNode *parse_main_decl(Parser *p) {
     expect(p, T_LBRACE, "Expected '{' at start of function block.");
     node->func_decl.block = parse_block(p, T_RBRACE);
 
-    return node;
+    return node; */
 }
 
 //- params                 = identifier, { ',', identifier }
@@ -820,7 +827,7 @@ static ParserNode *parse_block(Parser *p, TokenType block_end) {
         if (match(p, T_NEWLINE) || match(p, T_SEMICOLON))
             continue;
         ParserNode *stmt = parse_stmt(p);
-        block_add_stmt(block, stmt);
+        block_add_stmt(p, block, stmt);
 
         if (match(p, T_NEWLINE) || match(p, T_SEMICOLON))
             continue;
@@ -840,9 +847,8 @@ static ParserNode *parse_block(Parser *p, TokenType block_end) {
 static ParserNode *parse_binary(Parser *p, ParserNode *lhs) {
     PRINT_FUNC_NAME;
 
-    ParserNode *rhs = parse_expr_prec(p, PREC_FACTOR);
-
     ParserNode *node = new_node(p, NODE_BINARY_OP);
+    ParserNode *rhs = parse_expr_prec(p, PREC_FACTOR);
     node->binary_op.lhs = lhs;
     node->binary_op.rhs = rhs; // TODO need to do plus
 
@@ -851,15 +857,9 @@ static ParserNode *parse_binary(Parser *p, ParserNode *lhs) {
 
 static ParserNode *parse_assign(Parser *p, ParserNode *lhs) {
     PRINT_FUNC_NAME;
-    ParserNode *rhs = parse_expr_prec(p, PREC_LOWEST);
-
-    /* if (rhs->kind == NODE_IDENTIFIER && is_expr_start(current(p).type)) {
-        rhs = parse_bare_call(p, rhs);
-    } */
-
     ParserNode *node = new_node(p, NODE_ASSIGNMENT);
     node->assign.lhs = lhs;
-    node->assign.rhs = rhs;
+    node->assign.rhs = parse_expr_prec(p, PREC_LOWEST);
 
     return node;
 }
@@ -888,6 +888,7 @@ static ParserNode *parse_grouping(Parser *p) {
 static ParserNode *parse_call(Parser *p, ParserNode *lhs) {
     PRINT_FUNC_NAME;
 
+    ParserNode *node = new_node(p, NODE_FUNC_CALL);
     ParserNode **args = NULL;
     size_t count = 0;
 
@@ -902,7 +903,6 @@ static ParserNode *parse_call(Parser *p, ParserNode *lhs) {
 
     expect(p, T_RPAREN, "Expected ')' after arguments.");
 
-    ParserNode *node = new_node(p, NODE_FUNC_CALL);
     node->func_call.callee = lhs;
     node->func_call.args = args;
     node->func_call.args_count = count;
@@ -912,6 +912,7 @@ static ParserNode *parse_call(Parser *p, ParserNode *lhs) {
 static ParserNode *parse_array_lit(Parser *p) {
     PRINT_FUNC_NAME;
 
+    ParserNode *node = new_node(p, NODE_ARRAY_LITERAL);
     ParserNode **elems = NULL;
     size_t count = 0;
 
@@ -935,7 +936,6 @@ static ParserNode *parse_array_lit(Parser *p) {
 
     expect(p, T_RSQBRACKET, "Expected ']' after array literal.");
 
-    ParserNode *node = new_node(p, NODE_ARRAY_LITERAL);
     node->array_literal.elems = elems;
     node->array_literal.count = count;
     node->array_literal.length_expr = length;
@@ -1013,12 +1013,10 @@ static ParserNode *parse_comma(Parser *p, ParserNode *lhs) {
     return make_multi_assign(p, targets, target_count, values, value_count);
 }
 
-
 static void skip_newlines(Parser *p) {
     while (current(p)->type == T_NEWLINE)
         advance(p);
 }
-
 
 static ParserNode *parse_if_expr(Parser *p) {
     PRINT_FUNC_NAME;
