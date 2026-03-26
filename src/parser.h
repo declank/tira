@@ -1,9 +1,12 @@
 #pragma once
 
 /*
+
+
 //- We will define the grammar so that it is searchable
 //- Each grammar definition starts with '//-' so these are easy to grep
 //-
+
 */
 
 #include "common.h"
@@ -29,8 +32,6 @@ typedef struct {
     X(NIL) X(FUNC_CALL) X(INDEX) X(RANGE) X(DOT_ACCESS) X(BOOL) X(AGGREGATE) X(TERNARY) \
     X(FOR_EXPR) X(CAST) X(PARAM)
 
-// X(FUNC_DECL) X(CFFI_FUNC_DECL)
-
 #define X(KIND) NODE_##KIND,
 typedef enum { X_PARSER_NODE_KINDS } ParserNodeKind;
 #undef X
@@ -51,7 +52,7 @@ typedef enum {
     BINOP_DIV,
 } BinaryOpType;
 
-typedef enum {
+typedef enum : uint8_t {
     QUALIFIER_UNKNOWN,
     QUALIFIER_CONST,
     QUALIFIER_VAR
@@ -62,28 +63,38 @@ typedef struct {
     size_t hash;
 } InternedStr;
 
+
+// TODO need to have extra data contingent too, possibly in a union
 typedef struct { InternedStr name; InternedStr type; } Param;
 typedef struct { InternedStr name; } TypeParam;
+typedef struct { Param *params; int params_count; InternedStr ret; } FuncData;
 
-typedef struct { ParserNode **stmts; size_t count; Param *params; size_t params_count; } Node_Block;
-typedef struct { ParserNode *identifier; Param *params; int param_count; InternedStr ret; ParserNode *block; } Node_FuncDecl;
+typedef struct {
+    TypeQualifier qualifier;
+    InternedStr type_name;
+} TypeInfo;
+
+typedef struct { ParserNode **stmts; Param *params; uint16_t statements_count; uint16_t params_count; } Node_Block;
+typedef struct { ParserNode *identifier; ParserNode *block; FuncData *func_data; } Node_FuncDecl;
 typedef struct { ParserNode *callee; ParserNode **args; size_t args_count; } Node_FuncCall;
 typedef struct { ParserNode *expr; } Node_Return;
-typedef struct { ParserNode *identifier; ParserNode *type; ParserNode *rhs; TypeQualifier qualifier; } Node_ConstVarDecl;
+typedef struct { ParserNode *identifier; ParserNode *rhs; TypeInfo *type_info; } Node_ConstVarDecl;
 typedef struct { ParserNode *lhs; ParserNode *rhs; } Node_Assign;
 typedef struct { ParserNode **elems; size_t count; ParserNode *length_expr; } Node_ArrayLiteral;
 typedef struct { BinaryOpType type; ParserNode *lhs; ParserNode *rhs; } Node_BinaryOp;
 typedef struct { ParserNode *cond; ParserNode *then_branch; ParserNode *else_branch; } Node_IfExpr;
 typedef struct { ParserNode *base; ParserNode *index; } Node_Index;
 typedef struct { ParserNode *lhs; ParserNode *rhs; b8 inclusive; } Node_Range;
-typedef struct { ParserNode *lhs; Token member; } Node_DotAccess; // TODO
+typedef struct { ParserNode *lhs; Token *member; } Node_DotAccess;
 typedef struct { TokenType op; ParserNode *expr; } Node_Unary;
-typedef struct { ParserNode **targets; ParserNode **values; int count; } Node_Aggregate;
+typedef struct { ParserNode **targets; ParserNode **values; size_t count; } Node_Aggregate;
 typedef struct { ParserNode *cond; ParserNode *then_expr; ParserNode *else_expr; } Node_Ternary;
 typedef struct { ParserNode *ident; ParserNode *iter_expr; } Node_ForExpr;
 typedef struct { ParserNode *to_type; } Node_Cast;
 
-struct ParserNode {
+// TODO: Move to using uint32_t indices instead of pointers
+// e.g. kind | lhs | rhs | (possible extra data) = 16 bytes
+struct ParserNode { // minimised from 64 to 32 bytes 
     ParserNodeKind kind;
     union {
         double real_value;
@@ -287,10 +298,10 @@ static Token *expect(Parser *p, TokenType type, const char *msg) {
     return advance(p);
 }
 
-static void block_add_stmt(Parser *p, ParserNode *block, ParserNode *stmt) {
-    // TODO
-    block->block.stmts = realloc_array(p->arena, block->block.stmts, ParserNode*, block->block.count + 1);
-    block->block.stmts[block->block.count++] = stmt;
+static void block_add_stmt(Parser *p, Node_Block *block, ParserNode *stmt) {
+    block->stmts = 
+        realloc_array(p->arena, block->stmts, ParserNode*, block->statements_count + 1);
+    block->stmts[block->statements_count++] = stmt;
 }
 
 static ParserNode *new_node(Parser *p, ParserNodeKind kind) {
@@ -412,7 +423,7 @@ void parse_program(Parser *p) {
             continue;
         
         ParserNode *stmt = parse_stmt(p);
-        block_add_stmt(p, program, stmt);
+        block_add_stmt(p, &program->block, stmt);
 
         //getchar();
 
@@ -479,10 +490,14 @@ static ParserNode *parse_func_decl(Parser *p) {
         expect(p, T_RPAREN, "Expected ')' after arguments.");
     }
 
-    node->func_decl.identifier = identifier;
-    node->func_decl.params = params;
-    node->func_decl.param_count = params_count;
 
+    FuncData *func_data = new(p->arena, FuncData, 1);
+    func_data->params = params;
+    func_data->params_count = params_count;
+    func_data->ret = (InternedStr){0};
+
+    node->func_decl.identifier = identifier;
+    node->func_decl.func_data = func_data;
     expect(p, T_LBRACE, "Expected '{' at start of function block.");
     node->func_decl.block = parse_block(p, T_RBRACE);
 
@@ -809,7 +824,7 @@ static ParserNode *parse_block(Parser *p, TokenType block_end) {
         if (match(p, T_NEWLINE) || match(p, T_SEMICOLON))
             continue;
         ParserNode *stmt = parse_stmt(p);
-        block_add_stmt(p, block, stmt);
+        block_add_stmt(p, &block->block, stmt);
 
         if (match(p, T_NEWLINE) || match(p, T_SEMICOLON))
             continue;
@@ -951,8 +966,7 @@ static ParserNode *parse_dot(Parser *p, ParserNode *lhs) {
     node->dot_access.lhs = lhs;
 
     Token *member = expect(p, T_IDENT, "Expected member name after '.'.");
-    node->dot_access.member =
-        *member; // TODO should this node contain pointer to tok or tok
+    node->dot_access.member = member;
     return node;
 }
 
