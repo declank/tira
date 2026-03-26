@@ -66,7 +66,7 @@ typedef struct { InternedStr name; InternedStr type; } Param;
 typedef struct { InternedStr name; } TypeParam;
 
 typedef struct { ParserNode **stmts; size_t count; Param *params; size_t params_count; } Node_Block;
-typedef struct { InternedStr identifier; Param *params; int param_count; InternedStr ret; ParserNode *block; } Node_FuncDecl;
+typedef struct { ParserNode *identifier; Param *params; int param_count; InternedStr ret; ParserNode *block; } Node_FuncDecl;
 typedef struct { ParserNode *callee; ParserNode **args; size_t args_count; } Node_FuncCall;
 typedef struct { ParserNode *expr; } Node_Return;
 typedef struct { ParserNode *identifier; ParserNode *type; ParserNode *rhs; TypeQualifier qualifier; } Node_ConstVarDecl;
@@ -458,8 +458,9 @@ static ParserNode *parse_func_decl(Parser *p) {
     PRINT_FUNC_NAME;
 
     ParserNode *node = new_node(p, NODE_FUNC_DECL);
+    // Advance if identifier (not main)
+    match(p, T_IDENT);
     ParserNode *identifier = parse_identifier(p);
-    //Token* ident = expect(p, T_IDENT, "Function name must follow 'func'");
 
     TypeParam *type_params = NULL;
     size_t type_params_count = 0;
@@ -478,7 +479,7 @@ static ParserNode *parse_func_decl(Parser *p) {
         expect(p, T_RPAREN, "Expected ')' after arguments.");
     }
 
-    node->func_decl.identifier = str_intern(p, previous(p));
+    node->func_decl.identifier = identifier;
     node->func_decl.params = params;
     node->func_decl.param_count = params_count;
 
@@ -492,25 +493,7 @@ static ParserNode *parse_func_decl(Parser *p) {
 //- 
 static ParserNode *parse_main_decl(Parser *p) {
     PRINT_FUNC_NAME;
-
-    assert(p->pos > 0);
-    //p->pos--;
     return parse_func_decl(p);
-
-/*     ParserNode *node = new_node(p, NODE_FUNC_DECL);
-
-    // Hacky way of saving "main" keyword also as the function name, later we will implement "main" as a macro instead of keyword
-    Token* main = current(p);
-    node->func_decl.identifier = str_intern(p, main);
-
-    // TODO: Case for main(args: []string)
-    node->func_decl.params = NULL;
-    node->func_decl.param_count = 0;
-
-    expect(p, T_LBRACE, "Expected '{' at start of function block.");
-    node->func_decl.block = parse_block(p, T_RBRACE);
-
-    return node; */
 }
 
 //- params                 = identifier, { ',', identifier }
@@ -778,9 +761,8 @@ static ParserNode *parse_for_expr(Parser *p) {
 static ParserNode *parse_return(Parser *p) {
     PRINT_FUNC_NAME;
     
-    ParserNode *expr = parse_expr(p);
     ParserNode *ret = new_node(p, NODE_RETURN);
-
+    ParserNode *expr = parse_expr(p);
     ret->ret.expr = expr;
 
     return ret;
