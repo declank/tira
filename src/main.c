@@ -121,6 +121,8 @@ void debug_print_lexer(Compiler *c) {
 
     for (size_t i = 0; i < lexer->size; i++) {
         Token cur = lexer->tokens[i];
+        sb_build(&sb, i);
+        sb_build(&sb, S(":L"));
         sb_build(&sb, cur.line);
         sb_char(&sb, ':');
         sb_build(&sb, token_type_strings[cur.type]);
