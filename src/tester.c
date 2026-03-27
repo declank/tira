@@ -1,6 +1,24 @@
 
-#include "parser.h"
-#include "string.h"
+#include <assert.h>
+#include <stddef.h>
+#include <stdarg.h>
+
+#include "common.h"
+#include "memory.c"
+#include "string.c"
+#include "platform.h"
+#include "print.c"
+#include "lexer.c"
+#include "parser.c"
+#include "bootstrap_codegen.c"
+#include "compiler.c"
+
+/* #include "memory.c"
+#include "string.c"
+#include "print.c"
+#include "lexer.c"
+#include "parser.c"
+#include "compiler.c" */
 
 typedef struct Test Test;
 struct Test {
@@ -10,14 +28,11 @@ struct Test {
     b32 passed;
 };
 
-// @Cleanup, note that id_idx etc are not in parens!!
-// This should be fine if not passing in an expression in the test cases.
-
 #define MK_VAR_DECL(name, id_idx, rhs_idx) \
     [name] = (ParserNode){ .kind = NODE_VAR_DECL, \
         .const_var_decl = (Node_ConstVarDecl){ \
-            .identifier = &test_input[id_idx], \
-            .rhs        = &test_input[rhs_idx] }}
+            .identifier = &NODES_ARR_NAME[id_idx], \
+            .rhs        = &NODES_ARR_NAME[rhs_idx] }}
 
 #define MK_IDENTIFIER(name, str) \
     [name] = (ParserNode){ .kind = NODE_IDENTIFIER, .identifier = S(str) }
@@ -28,8 +43,8 @@ struct Test {
 #define MK_BINARY_OP(name, op, lhs_idx, rhs_idx) \
     [name] = (ParserNode){ .kind = NODE_BINARY_OP, \
         .binary_op = (Node_BinaryOp){ \
-            .lhs  = &test_input[lhs_idx], \
-            .rhs  = &test_input[rhs_idx], \
+            .lhs  = &NODES_ARR_NAME[lhs_idx], \
+            .rhs  = &NODES_ARR_NAME[rhs_idx], \
             .type = op }}
 
 #define MK_BLOCK(name) \
@@ -42,89 +57,104 @@ struct Test {
     [name] = (ParserNode){ .kind = NODE_FUNC_DECL, \
         .func_decl = (Node_FuncDecl){ \
             .func_data = NULL, \
-            .identifier = &test_input[identifier_], \
-            .block = &test_input[block_] }}
+            .identifier = &NODES_ARR_NAME[identifier_], \
+            .block = &NODES_ARR_NAME[block_] }}
 
 #define MK_RETURN(name, expr_) \
     [name] = (ParserNode){ .kind = NODE_RETURN, \
         .ret = (Node_Return) { \
-            .expr = &test_input[expr_]}}
+            .expr = &NODES_ARR_NAME[expr_]}}
 
 
 #define TEST_SUCCESS 0
 #define TEST_FAILED 1
 
-/*
-Input:
-var width = 1280
-var height = 720
+///// Start of tests /////
 
-main {
-    return width*height
-}
+int test_parser(void) {
+    const char source[] = 
+        "var width = 1280\n"
+        "var height = 720\n\n"
+        "main {\n"
+        "    return width*height\n"
+        "}\n";
 
-Output:
-loadk 0 1280
-loadk 1 720
-mul 2 0 1
-mov 0 2
-ret 
-*/
-int test_bytecode_generation(void) {
-    // clang-format off
-
-    // @Cleanup seems a bit excessive writing positionals these out like this
-    // May want to instead consider using 0, 1, 2
-    enum {
-        PROG_BLOCK,
-        WIDTH_DECL,
-        WIDTH_DECL_ID,
-        WIDTH_VAL,
-        HEIGHT_DECL,
-        HEIGHT_DECL_ID,
-        HEIGHT_VAL,
-        MAIN_DECL,
-        MAIN_ID,
-        MAIN_BLOCK,
-        RETURN,
-        WIDTH_REF,
-        MUL,
-        HEIGHT_REF,
-        PROG_COUNT,
+#define NODES_ARR_NAME expected
+    ParserNode expected[] = {
+        MK_BLOCK        (0),
+        MK_VAR_DECL     (1, 2, 3),
+        MK_IDENTIFIER   (2, "width"),
+        MK_NUMBER       (3, 1280),
+        MK_VAR_DECL     (4, 5, 6),
+        MK_IDENTIFIER   (5, "height"),
+        MK_NUMBER       (6, 720),
+        MK_FUNC_DECL    (7, 8, 9),
+        MK_IDENTIFIER   (8, "main"),
+        MK_BLOCK        (9),
+        MK_RETURN       (10, 12),
+        MK_IDENTIFIER   (11, "width"),
+        MK_BINARY_OP    (12, BINOP_MUL, 11, 13),
+        MK_IDENTIFIER   (13, "height"),
     };
+#undef NODES_ARR_NAME
 
-    // TODO reference to other array elements within declaration is undefined behaviour!!
-    ParserNode test_input[PROG_COUNT] = {
-        MK_BLOCK        (PROG_BLOCK),
-        MK_VAR_DECL     (WIDTH_DECL, WIDTH_DECL_ID, WIDTH_VAL),
-        MK_IDENTIFIER   (WIDTH_DECL_ID, "width"),
-        MK_NUMBER       (WIDTH_VAL, 1280),
-        MK_VAR_DECL     (HEIGHT_DECL, HEIGHT_DECL_ID, HEIGHT_VAL),
-        MK_IDENTIFIER   (HEIGHT_DECL_ID, "height"),
-        MK_NUMBER       (HEIGHT_VAL, 720),
-        MK_FUNC_DECL    (MAIN_DECL, MAIN_ID, MAIN_BLOCK),
-        MK_IDENTIFIER   (MAIN_ID, "main"),
-        MK_BLOCK        (MAIN_BLOCK),
-        MK_RETURN       (RETURN, MUL),
-        MK_IDENTIFIER   (WIDTH_REF, "width"),
-        MK_BINARY_OP    (MUL, BINOP_MUL, WIDTH_REF, HEIGHT_REF),
-        MK_IDENTIFIER   (HEIGHT_REF, "height"),
-    };
+/*     Compiler compiler = compiler_init(); nocheckin
+    parse_source(&c, source);
 
-    // TODO due to variable length instructions we will need to write tests
-    // with disassembled strings.
-    const char *expected[] = {
-        "loadk 0 1280",
-        "loadk 1 720",
-        "mul 2 0 1",
-        "mov 0 2",
-        "ret",
-    };
+    if (!check_parse_nodes_match(expected, compiler.parser->nodes)) {
+        compiler_destroy(&compiler);
+        return TEST_FAILED;
+    }
 
-    // clang-format on
+    compiler_destroy(&compiler);
+    return TEST_SUCCESS; */
 
     return TEST_FAILED;
 }
+
+int test_bytecode_generation(void) {
+    // TODO reference to other array elements within declaration is undefined behaviour!!
+    const char source[] = 
+        "var width = 1280\n"
+        "var height = 720\n\n"
+        "main {\n"
+        "    return width*height\n"
+        "}\n";
+
+    const char *expected_debug[] = {
+        "loadk_int 0 1280",
+        "loadk_int 1 720",
+        "mul_int 0 0 1",
+        "ret"
+    };
+
+    const char *expected_release[] = {
+        "loadk_int 0 921600",
+        "ret"
+    };
+
+/*     Compiler compiler = compiler_init(); nocheckin
+    compile_source_string(source, COMPILE_MODE_DEBUG);
+
+    if (!check_bytecode_matches(expected_debug, compiler.bytecode)) {
+        compiler_destroy(&compiler);
+        return TEST_FAILED;
+    }
+
+    compiler_reset(&compiler);
+    compile_source_string(source, COMPILE_MODE_RELEASE);
+    if (!check_bytecode_matches(expected_release, compiler.bytecode)) {
+        compiler_destroy(&compiler);
+        return TEST_FAILED;
+    }
+
+    compiler_destroy(&compiler);
+    return TEST_SUCCESS; */
+
+    return TEST_FAILED;
+}
+
+///// End of tests /////
 
 int main(int argc, const char *argv[]) {
     (void) argc;

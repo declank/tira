@@ -1,12 +1,16 @@
 
 #include <fcntl.h>
+#include <stdbool.h>
+#include <stdint.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "common.h"
 #include "memory.h"
-#include "platform.h"
 #include "string.h"
+
+#include "platform.h"
 
 #define SYS_read 0
 #define SYS_write 1

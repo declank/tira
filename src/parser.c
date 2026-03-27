@@ -13,17 +13,6 @@
 
 */
 
-#include "common.h"
-#include "lexer.h"
-#include "memory.h"
-#include "print.h"
-#include "string.h"
-#include <assert.h>
-#include <stdarg.h>
-#include <stdint.h>
-#include <stdio.h>
-
-
 typedef struct {
     String message;
     uint32_t line;
@@ -45,8 +34,6 @@ static String node_kind_strings[] = {X_PARSER_NODE_KINDS};
 #undef X
 
 typedef struct ParserNode ParserNode;
-
-typedef int8_t b8;
 
 typedef enum {
     BINOP_INVALID,

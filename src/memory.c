@@ -1,5 +1,5 @@
 
-#include "common.h"
+
 #include "memory.h"
 
 Arena arena_create(size_t size) {
@@ -47,17 +47,7 @@ void *alloc(Arena *a, size_t size, size_t align, size_t count) {
     return (void *) aligned;
 }
 
-/* void *realloc_array_(Arena *a, void *base, size_t elem_size, size_t align, size_t count) {
-    void *new_ptr = alloc(a, elem_size, align, count);
-    if (base && count > 1) {
-        memcpy(new_ptr, base, elem_size * (count - 1));
-    }
-    return new_ptr;
-} */
-
-typedef uint8_t b8; // TODO
-
-inline static size_t next_capacity(size_t count) {
+static inline size_t next_capacity(size_t count) {
     //return count < 8 ? 8 : count * 2;
     return count ? count * 2 : 1;
 }

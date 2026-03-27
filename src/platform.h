@@ -1,9 +1,7 @@
 #pragma once
 
-#include "string.h"
 
 typedef String FileBuf;
-
 
 int console_error(const char* error, size_t length);
 int console_out(const char *output, size_t length);

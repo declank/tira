@@ -2,7 +2,6 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include "common.h"
 
 typedef struct Arena Arena;
 struct Arena {
@@ -55,3 +54,4 @@ void *memset(void* dest, int ch, size_t count);
 int memcmp(const void* lhs, const void* rhs, size_t count);
 void *memchr(const void *ptr, int ch, size_t count);
 
+static inline size_t next_capacity(size_t count);

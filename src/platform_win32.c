@@ -10,10 +10,11 @@ int _fltused = 0;
 #include <windows.h>
 #include <shellapi.h>
 
-#include "platform.h"
+#include "common.h"
 #include "memory.h"
 #include "string.h"
-//#include "tira.h"
+
+#include "platform.h"
 
 int main(int argc, const char* argv[]);
 
@@ -216,6 +217,12 @@ bool get_file_size(const char* path, size_t* size) {
 }*/
 
 //static char *arg_storage[MAX_ARGS][MAX_ARG_LEN] = {0};
+
+[[noreturn]]
+void exit(int status) {
+    ExitProcess(status);
+    __builtin_unreachable();
+}
 
 int mainCRTStartup(void) {
     // Init console handles
