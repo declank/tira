@@ -1,5 +1,9 @@
 #pragma once
 
+#include <stdint.h>
+#include "common.h"
+#include "string.h"
+
 /*
 
 //-
@@ -113,6 +117,53 @@ struct ParserNode { // minimised from 64 to 32 bytes
         Node_Cast cast;
     };
 };
+
+bool hash_match(size_t hash1, size_t hash2) {
+    // TODO
+    return false;
+}
+
+bool params_match(Param *a, Param *b) {
+    if (a == b) return true;
+    if (!a || !b) return false;
+
+    if (hash_match(a->name.hash, b->name.hash)) return true;
+    if (string_compare(a->name.str, b->name.str) == 0) return true;
+
+    return false;
+}
+
+bool nodes_match(ParserNode *a, ParserNode *b) {
+    if (a == b) return true;
+    if (!a || !b) return false;
+    if (a->kind != b->kind) return false;
+
+    switch (a->kind) {
+        case NODE_BLOCK: {
+            Node_Block *ba = &a->block;
+            Node_Block *bb = &b->block;
+            if (ba->statements_count != bb->statements_count) return false;
+            if (ba->params_count != bb->params_count) return false;
+
+            for (uint16_t i = 0; i < ba->statements_count; i++) {
+                if (!nodes_match(ba->stmts[i], bb->stmts[i])) return false;
+            }
+            for (uint16_t i = 0; i < ba->params_count; i++) {
+                if (!params_match(&ba->params[i], &bb->params[i])) return false;
+            }
+
+            return true;
+        } break;
+
+        
+
+        default: {
+            assert(0); // Not defined
+        }
+    }
+
+    return false;
+}
 
 typedef struct {
     uint32_t line;

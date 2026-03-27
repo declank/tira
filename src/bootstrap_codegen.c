@@ -32,6 +32,10 @@ or the use of dynamic binding if used.
 
 */
 
+int bytecode_disasm(uint16_t *bytecode, char ***disasm, size_t *instruction_count) {
+    return 0; // return instruction count if succeeds, else return -1?
+}
+
 static uint16_t bytecode[4096];
 static uint16_t code_size = 0;
 

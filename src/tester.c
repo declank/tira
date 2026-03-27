@@ -13,13 +13,6 @@
 #include "bootstrap_codegen.c"
 #include "compiler.c"
 
-/* #include "memory.c"
-#include "string.c"
-#include "print.c"
-#include "lexer.c"
-#include "parser.c"
-#include "compiler.c" */
-
 typedef struct Test Test;
 struct Test {
     Test *next;
@@ -69,10 +62,31 @@ struct Test {
 #define TEST_SUCCESS 0
 #define TEST_FAILED 1
 
+void parse_source(Compiler *c, char *source) {
+}
+
+bool check_parse_nodes_match(ParserNode *expected, size_t expected_count,
+                             ParserNode *actual, size_t actual_count)
+{
+    if (expected_count != actual_count) { return false; }
+
+    for (size_t i = 0; i < expected_count; i++) {
+        if (!nodes_match(&expected[i], &actual[i])) return false;
+    }
+
+    return true;
+}
+
+bool check_bytecode_strings_match(char **expected_bytecode_text, size_t expected_instruction_count,
+                                  char **actual_bytecode_text, size_t actual_instruction_count)
+{
+    return false;
+}
+
 ///// Start of tests /////
 
 int test_parser(void) {
-    const char source[] = 
+    char source[] = 
         "var width = 1280\n"
         "var height = 720\n\n"
         "main {\n"
@@ -98,60 +112,61 @@ int test_parser(void) {
     };
 #undef NODES_ARR_NAME
 
-/*     Compiler compiler = compiler_init(); nocheckin
-    parse_source(&c, source);
+    Compiler compiler = compiler_init_default();
+    parse_source(&compiler, source);
 
-    if (!check_parse_nodes_match(expected, compiler.parser->nodes)) {
+    if (!check_parse_nodes_match(expected, countof(expected), compiler.parser.nodes, compiler.parser.node_count)) {
         compiler_destroy(&compiler);
         return TEST_FAILED;
     }
 
     compiler_destroy(&compiler);
-    return TEST_SUCCESS; */
-
-    return TEST_FAILED;
+    return TEST_SUCCESS;
 }
 
 int test_bytecode_generation(void) {
     // TODO reference to other array elements within declaration is undefined behaviour!!
-    const char source[] = 
+    char source[] = 
         "var width = 1280\n"
         "var height = 720\n\n"
         "main {\n"
         "    return width*height\n"
         "}\n";
 
-    const char *expected_debug[] = {
+    char *expected_debug[] = {
         "loadk_int 0 1280",
         "loadk_int 1 720",
         "mul_int 0 0 1",
         "ret"
     };
 
-    const char *expected_release[] = {
+    char *expected_release[] = {
         "loadk_int 0 921600",
         "ret"
     };
 
-/*     Compiler compiler = compiler_init(); nocheckin
-    compile_source_string(source, COMPILE_MODE_DEBUG);
+    Compiler compiler = compiler_init_default();
+    compile_source_string(&compiler, source, COMPILE_MODE_DEBUG);
 
-    if (!check_bytecode_matches(expected_debug, compiler.bytecode)) {
+    char **disasm = NULL;
+    size_t instruction_count;
+
+    bytecode_disasm(compiler.bytecode, &disasm, &instruction_count);
+    if (!check_bytecode_strings_match(expected_debug, countof(expected_debug), disasm, instruction_count)) { // @Clean merge with above line (e.g. disassemble bytecode and compare)
         compiler_destroy(&compiler);
         return TEST_FAILED;
     }
 
     compiler_reset(&compiler);
-    compile_source_string(source, COMPILE_MODE_RELEASE);
-    if (!check_bytecode_matches(expected_release, compiler.bytecode)) {
+    compile_source_string(&compiler, source, COMPILE_MODE_RELEASE);
+    bytecode_disasm(compiler.bytecode, &disasm, &instruction_count);
+    if (!check_bytecode_strings_match(expected_debug, countof(expected_debug), disasm, instruction_count)) { // @Clean merge with above line (e.g. disassemble bytecode and compare)
         compiler_destroy(&compiler);
         return TEST_FAILED;
     }
 
     compiler_destroy(&compiler);
-    return TEST_SUCCESS; */
-
-    return TEST_FAILED;
+    return TEST_SUCCESS;
 }
 
 ///// End of tests /////

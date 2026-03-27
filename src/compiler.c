@@ -1,6 +1,8 @@
 
 
+#include <assert.h>
 
+#include "memory.h"
 #include "platform.h"
 
 typedef enum {
@@ -12,15 +14,16 @@ typedef enum {
     STAGE_RAN,
 } CompileStage;
 
-
-struct Compiler {
+typedef struct {
     CompileStage stage;
     Lexer lexer;
     Parser parser;
+    uint16_t *bytecode;
+    size_t bytecode_size;
     Arena *arena;
     Arena *code_arena;
     Arena *temp_arena;
-};
+} Compiler;
 
 FileBuf read_entire_file(const char *path, Arena *arena) {
     return platform_read_entire_file((String) { .data = (char*)path, .len = strlen(path) }, arena);
@@ -28,8 +31,36 @@ FileBuf read_entire_file(const char *path, Arena *arena) {
 
 Compiler compiler_init(Arena *arena, Arena *code_arena, Arena *temp_arena) {
     return (Compiler) { 
-	.stage = STAGE_INITIALIZED, 
-	.arena = arena, .code_arena = code_arena, .temp_arena = temp_arena };
+	    .stage = STAGE_INITIALIZED, 
+	    .arena = arena, .code_arena = code_arena, .temp_arena = temp_arena
+    };
+}
+
+Compiler compiler_init_default(void) {
+    Arena arena = arena_create(megabytes(16));
+    Arena code_arena = arena_create_code(megabytes(4));
+    Arena temp_arena = arena_create(megabytes(16));
+
+    return compiler_init(&arena, &code_arena, &temp_arena);
+}
+
+void compiler_destroy(Compiler *c) {
+    // TODO free the arenas
+    memzero(c, sizeof(*c));
+}
+
+typedef enum {
+    COMPILE_MODE_DEBUG,
+    COMPILE_MODE_RELEASE,
+} CompileMode;
+
+void compile_source_string(Compiler *c, char *source, CompileMode mode) {
+    // TODO
+}
+
+void compiler_reset(Compiler *c) {
+    compiler_destroy(c);
+    *c = compiler_init_default();
 }
 
 void compiler_lex_file(Compiler *c, const FileBuf *input_file) {
