@@ -7,6 +7,9 @@
 //- Each grammar definition starts with '//-' so these are easy to grep
 //- e.g. `grep //- src/parser.h`
 //-
+//- Grammar specification may inaccurately reflect the language implementation, and is meant to be a rough guide.
+//- 
+
 
 */
 
@@ -64,7 +67,7 @@ typedef struct {
     size_t hash;
 } InternedStr;
 
-
+// clang-format off
 // TODO need to have extra data contingent too, possibly in a union
 typedef struct { InternedStr name; InternedStr type; } Param;
 typedef struct { InternedStr name; } TypeParam;
@@ -93,6 +96,7 @@ typedef struct { ParserNode *cond; ParserNode *then_expr; ParserNode *else_expr;
 typedef struct { ParserNode *ident; ParserNode *iter_expr; } Node_ForExpr;
 typedef struct { ParserNode *to_type; } Node_Cast;
 
+// clang-format on
 // TODO: Move to using uint32_t indices instead of pointers
 // e.g. kind | lhs | rhs | (possible extra data) = 16 bytes
 struct ParserNode { // minimised from 64 to 32 bytes 
@@ -867,7 +871,7 @@ static ParserNode *parse_call(Parser *p, ParserNode *lhs) {
 
 
 //- index_op               = "[", expr, "]"
-//- index_expr             = postfix (* alias used in lvalue *)
+//- index_expr             = postfix            (* alias used in lvalue *)
 //-
 static ParserNode *parse_index(Parser *p, ParserNode *lhs) {
     PRINT_FUNC_NAME;
@@ -881,7 +885,7 @@ static ParserNode *parse_index(Parser *p, ParserNode *lhs) {
 
 // TODO should this be expression?
 //- dot_op                 = ".", identifer 
-//- index_expr             = postfix (* alias used in lvalue *)
+//- index_expr             = postfix            (* alias used in lvalue *)
 //-
 static ParserNode *parse_dot(Parser *p, ParserNode *lhs) {
     PRINT_FUNC_NAME;
@@ -1163,8 +1167,8 @@ static ParserNode *parse_block(Parser *p, TokenType block_end) {
 
 //- ----- END OF GRAMMAR -----
 //-
-
-
+// TODO maybe update EBNF for comments, shebang directive etc.
+// TODO how may I handle significant newlines or avoid in this grammar specification?
 
 
 
