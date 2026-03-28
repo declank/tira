@@ -3,11 +3,6 @@
 var history = []
 var history_count = 0
 
-func repl_run(input) {
-    // TODO: hook into your eval/vm here
-    print(input)
-}
-
 // Callback behaviour:
 // completion is called on <TAB>
 // hints is called on typing
@@ -27,6 +22,8 @@ func hints(buf, color, bold) {
     return nil
 }
 
+// readline, eval and print are implemented in the runtime
+
 main {
     print("tira 0.1\n")
     print("ctrl+c to exit\n")
@@ -43,8 +40,9 @@ main {
             history[history_count] = line
             history_count = history_count + 1
 
-            repl_run(input)
+            print(eval(input)) // eval calls into the runtime
         }
     }
 }
+
 
