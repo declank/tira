@@ -99,15 +99,23 @@ int vsnprintf(char *buffer, size_t bufsz,
         format++;
     }
 
-    if (bufsz > 0) {
+    /* if (bufsz > 0) {
         if (rem > 0) {
             *buffer = '\0';
         } else { 
             start[bufsz - 1] = '\0';
         }
+    } */
+
+    size_t written = 0;
+    if (bufsz > 0) {
+        written = bufsz - rem;
+
+        if (written < bufsz) start[written] = '\0';
+        else start[bufsz - 1] = '\0'; // null terminate in the case where buffer is full
     }
 
-    return bufsz - rem;
+    return written;
 }
 
 int error(const char *fmt, ...) {

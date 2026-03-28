@@ -86,6 +86,7 @@ bool check_bytecode_strings_match(char **expected_bytecode_text, size_t expected
 
 ///// Start of tests /////
 
+// TODO move the non-automated tests out particularly for base functionality like printf
 int test_printf(void) {
     // Note this test isn't automated
     printf("Hello world!\n");
@@ -195,9 +196,9 @@ int main(int argc, const char *argv[]) {
     RUN_TEST(test_bytecode_generation());
 
     if (tests_failed) {
-        error("%d tests failed!!!\n.", tests_failed);
+        error("%d tests failed!!!\n", tests_failed);
     } else {
-        printf("All tests passed.\n");
+        printf("All tests passed\n");
     }
 
     return tests_failed;
