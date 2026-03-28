@@ -1,4 +1,8 @@
 CompileFlags:
   Add: [
+    -include, main.c,
+    -xc,
     "-I3rdparty/llvm/include",
+    -std=c17
   ]
+

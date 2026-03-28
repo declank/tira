@@ -7,8 +7,13 @@ int error(const char *fmt, ...);
 
 int printf(const char* restrict format, ...);
 
-#define VSNPRINTF_PUTC do { if (rem > 1) { (*buffer++) = *format++; rem--; } } while(0)
+#define VSNPRINTF_PUTC          do { if (rem > 1) { (*buffer++) = *format++; rem--; } } while(0)
+#define VSNPRINTF_DIV_OUT       
+#define VSNPRINTF_OUT_DIGIT     
 
+/* int vsnprintf_putc(char *buffer, const char **format, size_t rem, char c) {
+    if (rem > 1) { *buffer++ = *(*format++); rem--; }
+}*/
 
 // TODO add back in restrict on buffer and format
 int vsnprintf(char *buffer, size_t bufsz,
@@ -41,6 +46,7 @@ int vsnprintf(char *buffer, size_t bufsz,
             format++; continue;
         }
 
+        // TODO factor out sizing
         if (*format == 'z' && format[1] == 'u') {
             size_t v = va_arg(vlist, size_t);
             
@@ -58,6 +64,33 @@ int vsnprintf(char *buffer, size_t bufsz,
             }
 
             format += 2;
+            continue;
+        }
+
+        if (*format == 'd') {
+            intptr_t v = va_arg(vlist, int); // TODO @Cleanup Note value is extended here (would need to then ensure INT64_MIN works correctly)
+            bool negative = false;
+            char tmp[16];
+            size_t i = 0;
+
+            if (v == 0) {
+                if (rem > 1) { *buffer++ = '0'; rem--; }
+                format += 1; continue;
+            }
+
+            if (v < 0) {
+                negative = true;
+                v = -v; // TODO Check does this work with INT_MIN
+            }
+
+            while (v > 0) { tmp[i++] = '0' + v % 10; v /= 10; }
+            if (negative) { tmp[i++] = '-'; }
+            if (rem > i + 1) {
+                rem -= i;
+                while (i--) { *buffer++ = tmp[i]; }
+            }
+
+            format++;
             continue;
         }
 

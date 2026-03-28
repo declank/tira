@@ -1,5 +1,6 @@
 
 #include <assert.h>
+#include <limits.h>
 #include <stddef.h>
 #include <stdarg.h>
 
@@ -84,6 +85,17 @@ bool check_bytecode_strings_match(char **expected_bytecode_text, size_t expected
 }
 
 ///// Start of tests /////
+
+int test_printf(void) {
+    // Note this test isn't automated
+    printf("Hello world!\n");
+    printf("There are %d bottles on the wall\n", 99);
+    printf("-5 = %d\n", -5);
+    printf("INT_MIN is: %d\n", INT_MIN);
+    printf("INT_MAX is: %d\n", INT_MAX);
+    printf("UINT64_MAX is: %zu\n", UINT64_MAX);
+    return TEST_SUCCESS;
+}
 
 int test_parser(void) {
     char source[] = 
@@ -171,12 +183,16 @@ int test_bytecode_generation(void) {
 
 ///// End of tests /////
 
+#define RUN_TEST(test) do { tests_failed += test; } while(0)
+
 int main(int argc, const char *argv[]) {
     (void) argc;
     (void) argv;
 
     int tests_failed = 0;
-    tests_failed += test_bytecode_generation();
+    RUN_TEST(test_printf());
+    RUN_TEST(test_parser());
+    RUN_TEST(test_bytecode_generation());
 
     if (tests_failed) {
         error("%d tests failed!!!\n.", tests_failed);

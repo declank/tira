@@ -48,10 +48,12 @@ void *realloc_array_(Arena *a, void *base, size_t elem_size, size_t align, size_
 
 
 //inline void *memset(void* dest, int ch, size_t count);
-void *memcpy(void *restrict dest, const void *restrict src, size_t count);
+void *memcpy(void * restrict dest, const void *restrict src, size_t count);
 void *memzero(void *ptr, size_t count);
 void *memset(void* dest, int ch, size_t count);
 int memcmp(const void* lhs, const void* rhs, size_t count);
 void *memchr(const void *ptr, int ch, size_t count);
 
 static inline size_t next_capacity(size_t count);
+
+

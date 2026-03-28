@@ -1,5 +1,6 @@
 #pragma once
 
+#include "string.h"
 
 typedef String FileBuf;
 
