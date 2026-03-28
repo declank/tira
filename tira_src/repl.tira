@@ -1,0 +1,50 @@
+#!/usr/bin/env tira
+
+var history = []
+var history_count = 0
+
+func repl_run(input) {
+    // TODO: hook into your eval/vm here
+    print(input)
+}
+
+// Callback behaviour:
+// completion is called on <TAB>
+// hints is called on typing
+
+func completion(buf, completions) {
+    if (buf[0] == #\h) {
+        completions.add("hello")
+        completions.add("hello there")
+    }
+}
+
+func hints(buf, color, bold) {
+    if buf.icase_cmp("hello") {
+        color.val = 35
+        bold.val = 0
+    }
+    return nil
+}
+
+main {
+    print("tira 0.1\n")
+    print("ctrl+c to exit\n")
+
+    var running = true
+    for running {
+        var input = readline("> ")
+
+        if input == nil || input == "exit" {
+            running = false
+        } else if input == "history" {
+            for i in 0..=history_count { print(history[i]) }
+        } else {
+            history[history_count] = line
+            history_count = history_count + 1
+
+            repl_run(input)
+        }
+    }
+}
+
