@@ -15,6 +15,7 @@
 #include "parser.c"
 #include "bootstrap_codegen.c"
 #include "compiler.c"
+#include "runtime.c"
 
 int main(int argc, const char *argv[]) {
     (void) argc;

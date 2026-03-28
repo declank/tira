@@ -43,31 +43,7 @@ typedef struct {
     void (*func)(int64_t);
 } FuncEntry;
 
-void tira_rt__puts(int64_t val) {
-    static char buf[32];
-    b8 negative = (val < 0);
 
-    if (val == 0) {
-        buf[0] = '0'; buf[1] = '\n'; buf[2] = '\0';
-        console_out(buf, 2);
-    }
-
-    int i = 0;
-    while (val > 0) { buf[i++] = '0' + val % 10; val /= 10; }
-
-    // 025, i = 3
-
-    int hi = i - 1, lo = 0;
-    while (lo < hi) { 
-        char tmp = buf[lo];
-        buf[lo++] = buf[hi];
-        buf[hi--] = tmp;
-    }
-
-    buf[i++] = '\n';
-    buf[i]   = '0';
-    console_out(buf, i);
-}
 
 static FuncEntry function_table[256];
 
@@ -170,6 +146,8 @@ void bootstrap_codegen_inner(ParserNode *node) {
 
     }
 }
+
+void tira_rt__puts(int64_t val); // TODO cleanup this forward declaration or refactor these to capture required funcs
 
 void bootstrap_codegen(Parser *p) {
     function_table[0] = (FuncEntry) {

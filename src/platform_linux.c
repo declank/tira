@@ -113,6 +113,10 @@ ssize_t read(int fd, void *buf, size_t count) {
     return syscall3(SYS_read, fd, (long)buf, count);
 }
 
+int console_read(char *buffer, size_t bufsz) {
+    return read(STDIN_FILENO, buffer, bufsz);
+}
+
 int console_error(const char *error, size_t length) {
     return write(STDERR_FILENO, error, length);
 }
