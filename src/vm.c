@@ -43,11 +43,19 @@ void vm_run(void) {
                 ((TiraRTFunc)function_table[func_slot].func)(0);
             } break;
 
-            case BYOP_TEST: {
+            case BYOP_TEST: { // immediately followed by JMP_REL_32
 
+
+                // JMP_REL_32
             } break;
 
-            case BYOP_JMP_REL_16: {
+            case BYOP_FOR_ARRAY: { // immediately followed by JMP_REL_32
+
+
+                // JMP_REL_32
+            } break;
+
+            case BYOP_JMP: { // JMP_REL_32
 
             } break;
 

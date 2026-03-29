@@ -82,7 +82,7 @@ typedef struct { ParserNode *expr; } Node_Return;
 typedef struct { ParserNode *identifier; ParserNode *rhs; TypeInfo *type_info; } Node_ConstVarDecl;
 typedef struct { ParserNode *lhs; ParserNode *rhs; } Node_Assign;
 typedef struct { ParserNode **elems; size_t count; ParserNode *length_expr; } Node_ArrayLiteral;
-typedef struct { BinaryOpType type; ParserNode *lhs; ParserNode *rhs; } Node_BinaryOp;
+typedef struct { TokenType op; ParserNode *lhs; ParserNode *rhs; } Node_BinaryOp;
 typedef struct { ParserNode *cond; ParserNode *then_branch; ParserNode *else_branch; } Node_IfExpr;
 typedef struct { ParserNode *base; ParserNode *index; } Node_Index;
 typedef struct { ParserNode *lhs; ParserNode *rhs; b8 inclusive; } Node_Range;
@@ -411,6 +411,23 @@ static bool is_expr_start(TokenType type) {
 static void skip_newlines(Parser *p) {
     while (current(p)->type == T_NEWLINE)
         advance(p);
+}
+
+b32 assert_tokentype_is_binop(TokenType type) {
+    switch (type) {
+        case T_PLUS:
+        case T_MINUS:
+        case T_ASTERISK:
+        case T_SLASH:
+        case T_LOGICAL_AND:
+        case T_LOGICAL_OR:
+        case T_EQEQ:
+        case T_NOT_EQ:
+            return true;
+        
+        default:
+            return false;
+    }
 }
 
 ///// Forward declarations for the recursive descent and Pratt parser functions
@@ -808,8 +825,12 @@ static ParserNode *parse_range(Parser *p, ParserNode *lhs) {
 static ParserNode *parse_binary(Parser *p, ParserNode *lhs) {
     PRINT_FUNC_NAME;
 
+    TokenType binop_token_type = previous(p)->type;
+    assert_tokentype_is_binop(binop_token_type);
+    
     ParserNode *node = new_node(p, NODE_BINARY_OP);
     ParserNode *rhs = parse_expr_prec(p, PREC_FACTOR);
+    node->binary_op.op = binop_token_type;
     node->binary_op.lhs = lhs;
     node->binary_op.rhs = rhs; // TODO need to do plus
 

@@ -88,7 +88,7 @@ static uint16_t arr_slots_capacity = 256;
     X(SET_FALSE) \
 \
     X(TEST) \
-    X(JMP_REL_16) \
+    X(JMP) /* This is a JMP_REL_32 */ \
 \
     X(FOR_ARRAY)
 
@@ -108,6 +108,11 @@ static String byop_strings[] = {
 
 void bytecode_emit_16(uint16_t val) {
     bytecode[code_size_bytes++] = val;
+}
+
+void bytecode_emit_32(uint32_t val) {
+    bytecode[code_size_bytes++] = val >> 16 & 0xFFFF;
+    bytecode[code_size_bytes++] = val & 0xFFFF;
 }
 
 void bytecode_emit_64(uint64_t val) {
@@ -172,7 +177,7 @@ void bootstrap_codegen_inner(ParserNode *node) {
 
     intptr_t int_value;
     b8 bool_value;
-    uint16_t func_arg_count, arg_slot_start;
+    uint16_t func_arg_count, arg_slot_start, ret_val_count;
 
     switch (node->kind) {
         case NODE_VAR_DECL: {
@@ -208,7 +213,22 @@ void bootstrap_codegen_inner(ParserNode *node) {
                     printf("LOAD_ARRAY %uh %uh\n", target_slot, array_literal_slot);
                     bytecode_emit_16(BYOP_LOAD_ARRAY);
                     bytecode_emit_16(target_slot); bytecode_emit_16(array_literal_slot);
-                }
+                } break;
+
+                case NODE_FUNC_CALL: {
+                    assert(node->func_call.callee);
+                    assert(node->func_call.args_count <= UINT16_MAX);
+                    func_arg_count = node->func_call.args_count;
+                    func_slot = get_func_slot(node->func_call.callee);
+                    ret_val_count = 1;
+
+                    printf("CALL f%uh %uh %uh %uh\n", func_slot, func_arg_count, arg_slot_start, ret_val_count);
+                    bytecode_emit_16(BYOP_CALL); 
+                    bytecode_emit_16(func_slot); bytecode_emit_16(func_arg_count); bytecode_emit_16(arg_slot_start); bytecode_emit_16(ret_val_count);
+                    
+                    // Move the result into the var_slot ??
+
+                } break;
 
                 default: {
                     //error("NODE_VAR_DECL not implemented for RHS kind: %S\n", node_kind_strings[rhs->kind]);
@@ -227,43 +247,45 @@ void bootstrap_codegen_inner(ParserNode *node) {
             assert(lhs_kind != NODE_INVALID && rhs_kind != NODE_INVALID);
 
             target_slot = var_slots++;
-            BinaryOpType binop_type = node->binary_op.type;
+            TokenType binop_type = node->binary_op.op;
+
+            assert_tokentype_is_binop(binop_type);
 
             switch (binop_type) {
-                case BINOP_ADD: {
-                    printf("ADD_INT %uh %uh %uh", target_slot, lhs_slot, rhs_slot);
+                case T_PLUS: {
+                    printf("ADD_INT %uh %uh %uh\n", target_slot, lhs_slot, rhs_slot);
                     bytecode_emit_16(BYOP_ADD_INT);
                     bytecode_emit_16(target_slot); bytecode_emit_16(lhs_slot); bytecode_emit_16(rhs_slot);                    
                 } break;
 
-                case BINOP_SUB: {
-                    printf("SUB_INT %uh %uh %uh", target_slot, lhs_slot, rhs_slot);
+                case T_MINUS: {
+                    printf("SUB_INT %uh %uh %uh\n", target_slot, lhs_slot, rhs_slot);
                     bytecode_emit_16(BYOP_SUB_INT);
                     bytecode_emit_16(target_slot); bytecode_emit_16(lhs_slot); bytecode_emit_16(rhs_slot);
                 } break;
 
-                case BINOP_MUL: {
-                    printf("MUL_INT %uh %uh %uh", target_slot, lhs_slot, rhs_slot);
+                case T_ASTERISK: {
+                    printf("MUL_INT %uh %uh %uh\n", target_slot, lhs_slot, rhs_slot);
                     bytecode_emit_16(BYOP_MUL_INT);
                     bytecode_emit_16(target_slot); bytecode_emit_16(lhs_slot); bytecode_emit_16(rhs_slot);
                 } break;
 
-                case BINOP_DIV: {
-                    printf("DIV_INT %uh %uh %uh", target_slot, lhs_slot, rhs_slot);
+                case T_SLASH: {
+                    printf("DIV_INT %uh %uh %uh\n", target_slot, lhs_slot, rhs_slot);
                     bytecode_emit_16(BYOP_DIV_INT);
                     bytecode_emit_16(target_slot); bytecode_emit_16(lhs_slot); bytecode_emit_16(rhs_slot);
                 } break;
 
-                case BINOP_EQUAL_TO: {
+                case T_EQEQ: {
                     switch (rhs_kind) {
                         case NODE_NIL: {
-                            printf("IS_NIL %uh %uh", target_slot, rhs_slot);   
+                            printf("IS_NIL %uh %uh\n", target_slot, rhs_slot);   
                             bytecode_emit_16(BYOP_IS_NIL);
                             bytecode_emit_16(target_slot); bytecode_emit_16(rhs_slot);
                         } break;
 
                         case NODE_STRING: {
-                            printf("STRING_EQUAL_TO %uh %uh %uh", target_slot, lhs_slot, rhs_slot);
+                            printf("STRING_EQUAL_TO %uh %uh %uh\n", target_slot, lhs_slot, rhs_slot);
                             bytecode_emit_16(BYOP_EQUAL_TO_STRING);
                             bytecode_emit_16(target_slot); bytecode_emit_16(lhs_slot); bytecode_emit_16(rhs_slot);
                         } break;
@@ -276,16 +298,16 @@ void bootstrap_codegen_inner(ParserNode *node) {
                     
                 } break;
 
-                case BINOP_LOGICAL_AND: {
+                case T_LOGICAL_AND: {
                     // Assumes both sides return bool
-                    printf("LOGICAL_AND_BOOL %uh %uh %uh", target_slot, lhs_slot, rhs_slot);
+                    printf("LOGICAL_AND_BOOL %uh %uh %uh\n", target_slot, lhs_slot, rhs_slot);
                     bytecode_emit_16(BYOP_LOGICAL_AND_BOOL);
                     bytecode_emit_16(target_slot); bytecode_emit_16(rhs_slot);
                 } break;
 
-                case BINOP_LOGICAL_OR: {
+                case T_LOGICAL_OR: {
                     // Assumes both sides return bool
-                    printf("LOGICAL_OR_BOOL %uh %uh %uh", target_slot, lhs_slot, rhs_slot);
+                    printf("LOGICAL_OR_BOOL %uh %uh %uh\n", target_slot, lhs_slot, rhs_slot);
                     bytecode_emit_16(BYOP_LOGICAL_OR_BOOL);
                     bytecode_emit_16(target_slot); bytecode_emit_16(rhs_slot);
                 } break;
@@ -303,10 +325,11 @@ void bootstrap_codegen_inner(ParserNode *node) {
             assert(node->func_call.args_count <= UINT16_MAX);
             func_arg_count = node->func_call.args_count;
             func_slot = get_func_slot(node->func_call.callee);
+            ret_val_count = 0;
 
-            printf("CALL f%uh %uh %uh\n", func_slot, func_arg_count, arg_slot_start);
+            printf("CALL f%uh %uh %uh %uh\n", func_slot, func_arg_count, arg_slot_start, ret_val_count);
             bytecode_emit_16(BYOP_CALL); 
-            bytecode_emit_16(func_slot); bytecode_emit_16(func_arg_count); bytecode_emit_16(arg_slot_start);
+            bytecode_emit_16(func_slot); bytecode_emit_16(func_arg_count); bytecode_emit_16(arg_slot_start); bytecode_emit_16(ret_val_count);
         } break;
 
         case NODE_FOR_EXPR: {
@@ -321,11 +344,11 @@ void bootstrap_codegen_inner(ParserNode *node) {
                     bytecode_emit_16(BYOP_TEST); bytecode_emit_16(var_slot);
 
                     printf("JMP 1\n");
-                    bytecode_emit_16(BYOP_JMP_REL_16); bytecode_emit_16(1);
+                    bytecode_emit_16(BYOP_JMP); bytecode_emit_32(1);
 
                     rel_addr_end_of_block = get_relative_addr(end_of_for_block); 
                     printf("JMP %uh\n", rel_addr_end_of_block);
-                    bytecode_emit_16(BYOP_JMP_REL_16); bytecode_emit_16(end_of_for_block);
+                    bytecode_emit_16(BYOP_JMP); bytecode_emit_32(rel_addr_end_of_block);
                 } else { // type is collection
                     uint16_t loop_index_var_slot = var_slots++;
                     uint16_t arr_slot = identifier_to_arr_slot(node->for_expr.ident);
@@ -333,11 +356,11 @@ void bootstrap_codegen_inner(ParserNode *node) {
                     bytecode_emit_16(BYOP_FOR_ARRAY); bytecode_emit_16(arr_slot); bytecode_emit_16(loop_index_var_slot);
 
                     printf("JMP 1\n");
-                    bytecode_emit_16(BYOP_JMP_REL_16); bytecode_emit_16(1);
+                    bytecode_emit_16(BYOP_JMP); bytecode_emit_32(1);
 
                     rel_addr_end_of_block = get_relative_addr(end_of_for_block); 
                     printf("JMP %uh\n", rel_addr_end_of_block);
-                    bytecode_emit_16(BYOP_JMP_REL_16); bytecode_emit_16(end_of_for_block);
+                    bytecode_emit_16(BYOP_JMP); bytecode_emit_32(rel_addr_end_of_block);
                 }
             } else { // for x in y { ... }
 
