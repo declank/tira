@@ -32,6 +32,7 @@ or the use of dynamic binding if used.
 
 */
 
+#include "string.h"
 int bytecode_disasm(uint16_t *bytecode, char ***disasm, size_t *instruction_count) {
     
 
@@ -43,7 +44,8 @@ static uint16_t code_size_bytes = 0;
 static uint16_t code_size_instructions = 0;
 
 typedef struct {
-    int64_t (*func)(int64_t);
+    //int64_t (*func)(int64_t);
+    void *func;
 } FuncEntry;
 
 typedef struct {
@@ -84,6 +86,14 @@ void bytecode_emit_64(uint64_t val) {
 }
 
 uint16_t get_func_slot(ParserNode *callee) {
+    // TODO change to hashes nocheckin
+    String id_str = callee->identifier.str;
+    if (0);
+    else if (string_compare(id_str, S("puts")) == 0) { return 0; }
+    else if (string_compare(id_str, S("gets")) == 0) { return 1; }
+    else if (string_compare(id_str, S("eval")) == 0) { return 2; }
+    else if (string_compare(id_str, S("print")) == 0) { return 3; }
+
     return 0;
 }
 

@@ -289,9 +289,9 @@ void compiler_run(Compiler *c) {
     assert(c->stage == STAGE_CODEGEN);
     c->stage = STAGE_RAN;
 
-    uint16_t inst = 0;
-    while (inst < code_size_bytes) {
-        switch (bytecode[inst++]) {
+    uint16_t bc_idx = 0;
+    while (bc_idx < code_size_bytes) {
+        switch (bytecode[bc_idx++]) {
             case BYOP_NOP: break;
 
             case BYOP_LOADK: {
@@ -319,7 +319,14 @@ void compiler_run(Compiler *c) {
             } break;
 
             case BYOP_CALL: {
+                typedef TiraVal (*TiraRTFunc)(TiraVal);
 
+                uint16_t func_slot = bytecode[bc_idx++]; 
+                uint16_t arg_count = bytecode[bc_idx++];
+                uint16_t arg_slot_start = bytecode[bc_idx++];
+
+                //((TiraVal (*)(TiraVal))function_table[func_slot].func)(0);
+                ((TiraRTFunc)function_table[func_slot].func)(0);
             } break;
 
             case BYOP_IS_NIL: {
@@ -337,9 +344,9 @@ void compiler_run(Compiler *c) {
             case BYOP_LOGICAL_OR_BOOL: {
 
             } break;
-
         }
-
     }
+
+    printf("bc_idx: %uh\n", bc_idx);
 }
 

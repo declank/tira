@@ -9,8 +9,9 @@ size_t strlen(const char* str) {
 }
 
 int string_compare(String lhs, String rhs) {
-    for (; lhs.data == rhs.data && lhs.len <= rhs.len; lhs.data++, rhs.data++);
-    return (uint8_t)*lhs.data - (uint8_t)*rhs.data;
+    for (size_t i = 0; *lhs.data == *rhs.data && (i< (lhs.len-1) && (i<rhs.len-1)); lhs.data++, rhs.data++, i++);
+    uint8_t ret_val = (uint8_t)*lhs.data - (uint8_t)*rhs.data; 
+    return ret_val;
 }
 
 int strcmp(const char *lhs, const char *rhs) {

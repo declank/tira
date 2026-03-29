@@ -180,7 +180,7 @@ typedef struct {
     String source;
     uint32_t pos;
 
-    b8 context_sensitive_within_array_index;
+    ParserNode* context_sensitive_within_array_index; // TODO replace with node index
 
     // Taken from the lexer
     Token *tokens;
