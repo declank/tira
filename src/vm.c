@@ -2,42 +2,34 @@
 void vm_run(void) {
     uint16_t bc_idx = 0;
     while (bc_idx < code_size_bytes) {
-        switch (bytecode[bc_idx++]) {
+        uint16_t operator = bytecode[bc_idx++];
+        uint16_t var_slot;
+        uint16_t arr_slot;
+        TiraVal tira_const;
+
+        switch (operator) {
             case BYOP_NOP: break;
 
+            { // LOADK ops
             case BYOP_LOADK: {
-
+                var_slot = bytecode[bc_idx++];
+                tira_const = bytecode[bc_idx++];
             } break;
+            } // End of LOADK ops
 
-            case BYOP_LOADK_INT: {
-
+            case BYOP_LOAD_ARRAY: {
+                var_slot = bytecode[bc_idx++];
+                arr_slot = bytecode[bc_idx++];
             } break;
 
             case BYOP_SET_TRUE: {
-                uint16_t var_slot = bytecode[bc_idx++];
+                var_slot = bytecode[bc_idx++];
                 var_table[var_slot] = TIRA_TRUE;
             } break;
 
             case BYOP_SET_FALSE: {
-                uint16_t var_slot = bytecode[bc_idx++];
+                var_slot = bytecode[bc_idx++];
                 var_table[var_slot] = TIRA_FALSE;
-
-            } break;
-
-            case BYOP_ADD_INT: {
-
-            } break;
-
-            case BYOP_SUB_INT: {
-
-            } break;
-
-            case BYOP_MUL_INT: {
-
-            } break;
-
-            case BYOP_DIV_INT: {
-
             } break;
 
             case BYOP_CALL: {
@@ -51,24 +43,18 @@ void vm_run(void) {
                 ((TiraRTFunc)function_table[func_slot].func)(0);
             } break;
 
-            case BYOP_IS_NIL: {
+            case BYOP_TEST: {
 
             } break;
 
-            case BYOP_EQUAL_TO_STRING: {
-
-            } break;
-
-            case BYOP_LOGICAL_AND_BOOL: {
-
-            } break;
-
-            case BYOP_LOGICAL_OR_BOOL: {
+            case BYOP_JMP_REL_16: {
 
             } break;
 
             default: {
-                printf("Operation not implemented\n");
+                printf("VM operation not implemented: ");
+                printf(byop_strings[operator].data); // @Fixup 1) use of %S (char* vs String), 2) put in as argument
+                printf("\n");
             } break;
         }
     }

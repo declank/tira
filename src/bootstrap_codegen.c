@@ -62,39 +62,49 @@ static uint16_t var_slots = 0;
 static uint16_t arr_slots = 0;
 static uint16_t arr_slots_capacity = 256;
 
-enum {
-    BYOP_NOP,
-    BYOP_LOADK,
-    BYOP_LOADK_INT,
-    BYOP_LOAD_ARRAY,
+#define X_BYTECODE_OPS \
+    X(NOP) \
+    X(LOADK) X(LOADK_INT) X(LOAD_ARRAY) \
+\
+    X(ADD) X(SUB) X(MUL) X(DIV) \
+\
+    X(ADD_INT) X(SUB_INT) X(MUL_INT) X(DIV_INT)\
+\
+    X(CALL) \
+    X(IS_NIL) \
+\
+    X(EQUAL_TO) \
+    X(NOT_EQUAL_TO) \
+    X(EQUAL_TO_STRING) \
+    X(NOT_EQUAL_TO_STRING) \
+\
+    X(LOGICAL_AND) \
+    X(LOGICAL_OR) \
+\
+    X(LOGICAL_AND_BOOL) \
+    X(LOGICAL_OR_BOOL) \
+\
+    X(SET_TRUE) \
+    X(SET_FALSE) \
+\
+    X(TEST) \
+    X(JMP_REL_16) \
+\
+    X(FOR_ARRAY)
 
-    BYOP_ADD,
-    BYOP_SUB,
-    BYOP_MUL,
-    BYOP_DIV,
+typedef enum {
+#define X(OP) BYOP_##OP,
+    X_BYTECODE_OPS
+#undef X
+} ByteCodeOp;
 
-    BYOP_ADD_INT,
-    BYOP_SUB_INT,
-    BYOP_MUL_INT,
-    BYOP_DIV_INT,
-
-    BYOP_CALL,
-    BYOP_IS_NIL,
-
-    BYOP_EQUAL_TO,
-    BYOP_NOT_EQUAL_TO,
-    BYOP_EQUAL_TO_STRING,
-    BYOP_NOT_EQUAL_TO_STRING,
-    
-    BYOP_LOGICAL_AND,
-    BYOP_LOGICAL_OR,
-
-    BYOP_LOGICAL_AND_BOOL,
-    BYOP_LOGICAL_OR_BOOL,
-    
-    BYOP_SET_TRUE,
-    BYOP_SET_FALSE,
+#define X(OP) S(#OP),
+static String byop_strings[] = {
+    X_BYTECODE_OPS
 };
+#undef X
+
+
 
 void bytecode_emit_16(uint16_t val) {
     bytecode[code_size_bytes++] = val;
@@ -115,6 +125,7 @@ uint16_t get_func_slot(ParserNode *callee) {
     else if (string_compare(id_str, S("gets")) == 0) { return 1; }
     else if (string_compare(id_str, S("eval")) == 0) { return 2; }
     else if (string_compare(id_str, S("print")) == 0) { return 3; }
+    else if (string_compare(id_str, S("append")) == 0) { return 4; }
 
     return 0;
 }
@@ -132,6 +143,27 @@ uint16_t add_array_literal_to_table(Node_ArrayLiteral arr) {
     entry->members = alloc_cg_array(arr.count);
     memcpy(entry->members, arr.elems, arr.count);
 
+    return 0;
+}
+
+// TODO do we want to use Node_Block, Node_Identifier etc. instead of using ParserNode*
+uint16_t get_var_slot_from_identifier(ParserNode *identifier) {
+    return 0; // TODO
+}
+
+b32 type_infer_is_scalar(ParserNode *node) {
+    return true;
+}
+
+uint16_t get_relative_addr(size_t bytecode_addr) {
+    return 0;
+}
+
+size_t end_of_block_addr(ParserNode *block) {
+    return 0;
+}
+
+uint16_t identifier_to_arr_slot(ParserNode *identifier) {
     return 0;
 }
 
@@ -179,7 +211,10 @@ void bootstrap_codegen_inner(ParserNode *node) {
                 }
 
                 default: {
-                    error("== not implemented for RHS kind: %S\n", node_kind_strings[rhs->kind]);
+                    //error("NODE_VAR_DECL not implemented for RHS kind: %S\n", node_kind_strings[rhs->kind]);
+                    error("NODE_VAR_DECL not implemented for RHS kind: ");
+                    error(node_kind_strings[rhs->kind].data);
+                    error("\n");
                 } break;
             }
             
@@ -192,8 +227,9 @@ void bootstrap_codegen_inner(ParserNode *node) {
             assert(lhs_kind != NODE_INVALID && rhs_kind != NODE_INVALID);
 
             target_slot = var_slots++;
+            BinaryOpType binop_type = node->binary_op.type;
 
-            switch (node->binary_op.type) {
+            switch (binop_type) {
                 case BINOP_ADD: {
                     printf("ADD_INT %uh %uh %uh", target_slot, lhs_slot, rhs_slot);
                     bytecode_emit_16(BYOP_ADD_INT);
@@ -233,7 +269,7 @@ void bootstrap_codegen_inner(ParserNode *node) {
                         } break;
 
                         default: {
-                            error("== not implemented for RHS kind: %S\n", node_kind_strings[rhs_kind]);
+                            error("BINOP_EQUAL_TO not implemented for RHS kind: %S\n", node_kind_strings[rhs_kind]);
                             assert(0);
                         } break;
                     }
@@ -273,25 +309,66 @@ void bootstrap_codegen_inner(ParserNode *node) {
             bytecode_emit_16(func_slot); bytecode_emit_16(func_arg_count); bytecode_emit_16(arg_slot_start);
         } break;
 
+        case NODE_FOR_EXPR: {
+            if (node->for_expr.iter_expr == NULL) { // for x { ... }
+                uint16_t var_slot = get_var_slot_from_identifier(node->for_expr.ident);
+                size_t end_of_for_block = end_of_block_addr(node->for_expr.block);
+                uint16_t rel_addr_end_of_block;
+
+                // If the type system can guarantee a scalar value (e.g. bool) then use TEST
+                if (type_infer_is_scalar(node->for_expr.ident)) {
+                    printf("TEST %uh\n", var_slot);
+                    bytecode_emit_16(BYOP_TEST); bytecode_emit_16(var_slot);
+
+                    printf("JMP 1\n");
+                    bytecode_emit_16(BYOP_JMP_REL_16); bytecode_emit_16(1);
+
+                    rel_addr_end_of_block = get_relative_addr(end_of_for_block); 
+                    printf("JMP %uh\n", rel_addr_end_of_block);
+                    bytecode_emit_16(BYOP_JMP_REL_16); bytecode_emit_16(end_of_for_block);
+                } else { // type is collection
+                    uint16_t loop_index_var_slot = var_slots++;
+                    uint16_t arr_slot = identifier_to_arr_slot(node->for_expr.ident);
+                    printf("FOR_ARRAY %uh %uh\n", arr_slot, loop_index_var_slot);
+                    bytecode_emit_16(BYOP_FOR_ARRAY); bytecode_emit_16(arr_slot); bytecode_emit_16(loop_index_var_slot);
+
+                    printf("JMP 1\n");
+                    bytecode_emit_16(BYOP_JMP_REL_16); bytecode_emit_16(1);
+
+                    rel_addr_end_of_block = get_relative_addr(end_of_for_block); 
+                    printf("JMP %uh\n", rel_addr_end_of_block);
+                    bytecode_emit_16(BYOP_JMP_REL_16); bytecode_emit_16(end_of_for_block);
+                }
+            } else { // for x in y { ... }
+
+            }
+        } break;
+
+        case NODE_IF_EXPR: {
+
+        } break;
+
         default: {
-            printf("Not yet implemented: ");
-            print(node_kind_strings[node->kind]);
-            printf("\n");
+            //printf("Codegen not yet implemented: ");
+            //printf(node_kind_strings[node->kind].data);
+            //printf("\n");
         } break;
 
     }
 }
-
-int64_t tira_rt__puts(int64_t val); // TODO cleanup this forward declaration or refactor these to capture required funcs
-int64_t tira_rt__gets(void);
-int64_t tira_rt__eval(int64_t input);
-int64_t tira_rt__print(void);
+// TODO cleanup this forward declaration or refactor these to capture required funcs
+TiraVal tira_rt__puts(int64_t val); 
+TiraVal tira_rt__gets(void);
+TiraVal tira_rt__eval(int64_t input);
+TiraVal tira_rt__print(void);
+TiraVal tira_rt__append(TiraVal arr, TiraVal elem);
 
 void bootstrap_codegen(Parser *p) {
     function_table[0] = (FuncEntry) { .func = tira_rt__puts };
     function_table[1] = (FuncEntry) { .func = tira_rt__gets };
     function_table[2] = (FuncEntry) { .func = tira_rt__eval };
     function_table[3] = (FuncEntry) { .func = tira_rt__print };
+    function_table[4] = (FuncEntry) { .func = tira_rt__append };
 
     for (uint32_t i = 0; i < p->node_count; i++) {
         ParserNode *node = &p->nodes[i];

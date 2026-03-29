@@ -18,12 +18,6 @@
     X(END) \
     X(COUNT)
 
-/* #define X(TYPE) T_##TYPE, 
-typedef enum {
-    X_TOKEN_TYPES
-} TokenType;
-#undef X */
-
 
 typedef enum {
 #define X(TYPE) T_##TYPE,

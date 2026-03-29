@@ -21,3 +21,7 @@ TiraVal tira_rt__puts(TiraVal str) {
     return 0;
 }
 
+TiraVal tira_rt__append(TiraVal arr, TiraVal elem) {
+    printf(__FUNCTION__); printf(" \n");
+    return 0;
+}

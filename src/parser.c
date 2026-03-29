@@ -90,7 +90,7 @@ typedef struct { ParserNode *lhs; Token *member; } Node_DotAccess;
 typedef struct { TokenType op; ParserNode *expr; } Node_Unary;
 typedef struct { ParserNode **targets; ParserNode **values; size_t count; } Node_Aggregate;
 typedef struct { ParserNode *cond; ParserNode *then_expr; ParserNode *else_expr; } Node_Ternary;
-typedef struct { ParserNode *ident; ParserNode *iter_expr; } Node_ForExpr;
+typedef struct { ParserNode *ident; ParserNode *iter_expr; ParserNode *block; } Node_ForExpr;
 typedef struct { ParserNode *to_type; } Node_Cast;
 
 // clang-format on
@@ -1172,11 +1172,12 @@ static ParserNode *parse_for_expr(Parser *p) {
     }
 
     expect(p, T_LBRACE, "Expected '{' after for condition");    
-    ParserNode *body = parse_block(p, T_RBRACE);
+    ParserNode *block = parse_block(p, T_RBRACE);
 
     ParserNode *node = new_node(p, NODE_FOR_EXPR);
     node->for_expr.ident = ident;
     node->for_expr.iter_expr = iter_expr;
+    node->for_expr.block = block;
     return node;
 }
 
