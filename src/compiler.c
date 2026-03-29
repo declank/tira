@@ -288,5 +288,58 @@ void compiler_codegen(Compiler *c) {
 void compiler_run(Compiler *c) {
     assert(c->stage == STAGE_CODEGEN);
     c->stage = STAGE_RAN;
+
+    uint16_t inst = 0;
+    while (inst < code_size_bytes) {
+        switch (bytecode[inst++]) {
+            case BYOP_NOP: break;
+
+            case BYOP_LOADK: {
+
+            } break;
+
+            case BYOP_LOADK_INT: {
+
+            } break;
+
+            case BYOP_ADD_INT: {
+
+            } break;
+
+            case BYOP_SUB_INT: {
+
+            } break;
+
+            case BYOP_MUL_INT: {
+
+            } break;
+
+            case BYOP_DIV_INT: {
+
+            } break;
+
+            case BYOP_CALL: {
+
+            } break;
+
+            case BYOP_IS_NIL: {
+
+            } break;
+
+            case BYOP_STRING_EQUAL_TO: {
+
+            } break;
+
+            case BYOP_LOGICAL_AND_BOOL: {
+
+            } break;
+
+            case BYOP_LOGICAL_OR_BOOL: {
+
+            } break;
+
+        }
+
+    }
 }
 

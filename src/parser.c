@@ -24,7 +24,7 @@ typedef struct {
 } ParseError;
 
 #define X_PARSER_NODE_KINDS \
-    X(NUMBER) X(STRING) X(CHARACTER) X(IDENTIFIER) X(BINARY_OP) X(UNARY) X(VAR_DECL) X(CONST_DECL) \
+    X(INVALID) X(NUMBER) X(STRING) X(CHARACTER) X(IDENTIFIER) X(BINARY_OP) X(UNARY) X(VAR_DECL) X(CONST_DECL) \
     X(ASSIGNMENT) X(BLOCK) X(CALL) X(ARRAY_LITERAL) X(FUNC_DECL) X(IF_EXPR) X(RETURN) \
     X(NIL) X(FUNC_CALL) X(INDEX) X(RANGE) X(DOT_ACCESS) X(BOOL) X(AGGREGATE) X(TERNARY) \
     X(FOR_EXPR) X(CAST) X(PARAM) X(DOLLAR)
@@ -45,6 +45,9 @@ typedef enum {
     BINOP_SUB,
     BINOP_MUL,
     BINOP_DIV,
+
+    BINOP_EQUAL_TO,
+    BINOP_NOT_EQUAL_TO,
 
     BINOP_LOGICAL_AND,
     BINOP_LOGICAL_OR,
@@ -1050,7 +1053,6 @@ static ParserNode *parse_character(Parser *p) {
 
     ParserNode *node = new_node(p, NODE_CHARACTER);
     node->character_literal = token_string(p, previous(p)); // We still need a string to hold a character literal
-    
     node->character_literal.data += 2; // Increment past the "#\"
     node->character_literal.len -= 2;
     return node;
@@ -1195,7 +1197,6 @@ static ParserNode *parse_identifier(Parser *p) {
 //- str_char               = any_char_except_double_quote_or_newline ;
 //- newline                = "\n" | "\r\n" ;
 //- 
-
 
 //- (* Statements *)
 //- statement              = shebang

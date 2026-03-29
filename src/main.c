@@ -50,6 +50,7 @@ int main(int argc, const char *argv[]) {
     debug_print_parser(&c);
  
     compiler_codegen(&c);
+    print(S("==========\n"));
     compiler_run(&c);
     
     return 0;

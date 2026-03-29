@@ -1,5 +1,5 @@
 
-typedef int64_t TiraVal;
+#include "common.h"
 
 TiraVal tira_rt__gets(void) {
     return 0;
