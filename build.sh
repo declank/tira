@@ -3,6 +3,9 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+# Make the build directory
+mkdir -p build/
+
 clang -ggdb -std=c17 -o build/tira -DDEBUG \
     src/main.c src/platform_linux.c \
     -nostdlib -ffreestanding -fno-exceptions -fno-rtti \

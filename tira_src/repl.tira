@@ -1,45 +1,43 @@
 #!/usr/bin/env tira
 
 var history = []
-var history_count = 0
 
 // Callback behaviour:
 // completion is called on <TAB>
 // hints is called on typing
 
 func completion(buf, completions) {
-    if (buf[0] == #\h) {
+    if buf[0] == #\h {
         completions.add("hello")
         completions.add("hello there")
     }
 }
 
 func hints(buf, color, bold) {
-    if buf.icase_cmp("hello") {
+    if buf.ic_cmp("hello") == 0 {
         color.val = 35
         bold.val = 0
     }
     return nil
 }
 
-// readline, eval and print are implemented in the runtime
+// eval, gets, print and puts are implemented in the runtime
 
 main {
-    print("tira 0.1\n")
-    print("ctrl+c to exit\n")
+    puts("tira 0.1")
+    puts("ctrl+c to exit")
 
     var running = true
     for running {
-        var input = readline("> ")
+        print("> ")
+        var input = gets()
 
         if input == nil || input == "exit" {
             running = false
         } else if input == "history" {
-            for i in 0..=history_count { print(history[i]) }
+            for history { print(it) }
         } else {
-            history[history_count] = line
-            history_count = history_count + 1
-
+            history[$] = line
             print(eval(input)) // eval calls into the runtime
         }
     }

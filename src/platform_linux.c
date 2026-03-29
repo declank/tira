@@ -1,4 +1,6 @@
 
+#define _GNU_SOURCE // for MAP_ANONYMOUS
+
 #include <fcntl.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -76,7 +78,7 @@ static inline long syscall6(long n, long a1, long a2, long a3, long a4, long a5,
 
 // Is there a potential issue here with casting or do value ranges have to be asserted?
 
-[[noreturn]]
+_Noreturn
 void exit(int status) {
     // Note there is no implementation of atexit and on_exit
 
@@ -174,6 +176,11 @@ FileBuf platform_read_entire_file(String path, Arena *arena) {
     result.len = total;
     return result;
 }
+
+// for macOS or other UNIX systems that have this
+#if !defined(MAP_ANONYMOUS) && defined(MAP_ANON)
+#define MAP_ANONYMOUS MAP_ANON
+#endif
 
 void *mem_alloc(size_t size) {
     void *p = mmap(NULL, size, PROT_READ | PROT_WRITE,

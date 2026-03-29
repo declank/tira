@@ -23,11 +23,11 @@ typedef struct {
     uint32_t column;
 } ParseError;
 
-#define X_PARSER_NODE_KINDS                                                           \
-    X(NUMBER) X(STRING) X(IDENTIFIER) X(BINARY_OP) X(UNARY) X(VAR_DECL) X(CONST_DECL) \
+#define X_PARSER_NODE_KINDS \
+    X(NUMBER) X(STRING) X(CHARACTER) X(IDENTIFIER) X(BINARY_OP) X(UNARY) X(VAR_DECL) X(CONST_DECL) \
     X(ASSIGNMENT) X(BLOCK) X(CALL) X(ARRAY_LITERAL) X(FUNC_DECL) X(IF_EXPR) X(RETURN) \
     X(NIL) X(FUNC_CALL) X(INDEX) X(RANGE) X(DOT_ACCESS) X(BOOL) X(AGGREGATE) X(TERNARY) \
-    X(FOR_EXPR) X(CAST) X(PARAM)
+    X(FOR_EXPR) X(CAST) X(PARAM) X(DOLLAR)
 
 #define X(KIND) NODE_##KIND,
 typedef enum { X_PARSER_NODE_KINDS } ParserNodeKind;
@@ -45,6 +45,9 @@ typedef enum {
     BINOP_SUB,
     BINOP_MUL,
     BINOP_DIV,
+
+    BINOP_LOGICAL_AND,
+    BINOP_LOGICAL_OR,
 } BinaryOpType;
 
 typedef enum : uint8_t {
@@ -97,6 +100,7 @@ struct ParserNode { // minimised from 64 to 32 bytes
         intptr_t int_value;
         b8 bool_value;
         String string;
+        String character_literal;
         InternedStr identifier;
         Node_Block block;
         Node_FuncDecl func_decl;
@@ -155,8 +159,6 @@ bool nodes_match(ParserNode *a, ParserNode *b) {
             return true;
         } break;
 
-        
-
         default: {
             assert(0); // Not defined
         }
@@ -174,6 +176,8 @@ typedef struct {
 typedef struct {
     String source;
     uint32_t pos;
+
+    b8 context_sensitive_within_array_index;
 
     // Taken from the lexer
     Token *tokens;
@@ -414,6 +418,8 @@ static ParserNode *parse_block(Parser *p, TokenType block_end);
 static ParserNode *parse_expr_prec(Parser *p, Precedence prec);
 static ParserNode *parse_number(Parser *p);
 static ParserNode *parse_string(Parser *p);
+static ParserNode *parse_character(Parser *p);
+static ParserNode *parse_dollar(Parser *p);
 static ParserNode *parse_identifier(Parser *p);
 static ParserNode *parse_grouping(Parser *p);
 static ParserNode *parse_call(Parser *p, ParserNode *lhs);
@@ -448,6 +454,7 @@ static ParseRule rules[T_COUNT] = {
     // ----- Terminals (literals and primaries)
     [T_NUM] = {parse_number, NULL, PREC_NONE},
     [T_STRING] = {parse_string, NULL, PREC_NONE},
+    [T_CHARACTER] = {parse_character, NULL, PREC_NONE},
     //[T_IDENT] = {parse_identifier, NULL, PREC_NONE},
     [T_IDENT] = {parse_identifier, NULL, PREC_NONE},
     //  [T_TRUE]       = { parse_bool,      NULL,         PREC_NONE },
@@ -455,6 +462,7 @@ static ParseRule rules[T_COUNT] = {
     [T_NIL] = {parse_nil, NULL, PREC_NONE},
     [T_TRUE] = {parse_bool, NULL, PREC_NONE},
     [T_FALSE] = {parse_bool, NULL, PREC_NONE},
+    [T_DOLLAR] = {parse_dollar, NULL, PREC_NONE},
 
     // ----- Grouping and collections
     [T_LPAREN] = {parse_grouping, parse_call, PREC_CALL},
@@ -481,6 +489,9 @@ static ParseRule rules[T_COUNT] = {
     [T_NOT_EQ] = {NULL, parse_binary, PREC_CMP},
 
     // ----- Logic
+    [T_LOGICAL_AND] = {NULL, parse_binary, PREC_AND},
+    [T_LOGICAL_OR] = {NULL, parse_binary, PREC_OR},
+
     //  [T_AND]        = { NULL,            parse_binary, PREC_AND },
     //  [T_OR]         = { NULL,            parse_binary, PREC_OR  },
 
@@ -616,10 +627,10 @@ static Param parse_param(Parser *p) {
     PRINT_FUNC_NAME;
 
     Token *param_tok = advance(p);
-
     Param param;
     param.name = str_intern(p, param_tok);
 
+    // Parse the optional typename
     if (match(p, T_COLON)) {
         Token *type_tok = expect(p, T_IDENT, "Expected type after : in parameter");
         param.type = str_intern(p, type_tok);
@@ -907,17 +918,37 @@ static ParserNode *parse_call(Parser *p, ParserNode *lhs) {
     return node;
 }
 
-
+// TODO is postfix correct
+// TODO need to correct use of "$" here
 //- index_op               = "[", expr, "]"
 //- index_expr             = postfix            (* alias used in lvalue *)
+//-                        | "$"                (* ... *)
 //-
 static ParserNode *parse_index(Parser *p, ParserNode *lhs) {
     PRINT_FUNC_NAME;
 
+    // Setting this context-sensitive feature for referring to length of an array within [] for slicing
+    //p->context_sensitive_within_array_index = true; // TODO need to handle case such as a[b[$]] - Yes use the lhs as context
+    p->context_sensitive_within_array_index = lhs;
     ParserNode *node = new_node(p, NODE_INDEX);
     node->index.base = lhs;
     node->index.index = parse_expr_prec(p, PREC_LOWEST);
     expect(p, T_RSQBRACKET, "Expected ']' after index.");
+    p->context_sensitive_within_array_index = NULL;
+    return node;
+}
+
+static ParserNode *parse_dollar(Parser *p) {
+    PRINT_FUNC_NAME;
+
+    ParserNode *node = NULL;
+    if (p->context_sensitive_within_array_index != NULL) {
+        node = new_node(p, NODE_IDENTIFIER);
+        Token *tok = previous(p);
+        node->identifier = str_intern(p, tok);
+    } else {
+        raise_error(p, "Invalid use of '$', this must be used in array indexing.");
+    }
     return node;
 }
 
@@ -936,7 +967,7 @@ static ParserNode *parse_dot(Parser *p, ParserNode *lhs) {
     return node;
 }
 
-//- primary                = number_lit | string_lit | nil | bool_lit
+//- primary                = number_lit | character_lit | string_lit | nil | bool_lit
 //-                        | identifier
 //-                        | "(", expr, ")"
 //-
@@ -955,8 +986,16 @@ static void parse_primary(Parser *p) {
         case T_NIL:
         case T_TRUE:
         case T_FALSE:
+        case T_CHARACTER:
             advance(p);
             break;
+
+        case T_DOLLAR: {
+            advance(p); // TODO: Should this be moved down into if body? Need to advance the parser.
+            if (p->context_sensitive_within_array_index == NULL) {
+                raise_error(p, "Invalid use of '$', this must be used in array indexing.");
+            }
+        } break;
 
         case T_LPAREN: {
             advance(p);
@@ -1001,6 +1040,19 @@ static ParserNode *parse_number(Parser *p) {
         raise_error(p, "Number provided is invalid.");
     }
 
+    return node;
+}
+
+//- character_lit          = "#\", char
+//- char                   = printable_non_whitespace_char | "u0000" | "space" | "tab" | ... | other_character_classes
+static ParserNode *parse_character(Parser *p) {
+    PRINT_FUNC_NAME;
+
+    ParserNode *node = new_node(p, NODE_CHARACTER);
+    node->character_literal = token_string(p, previous(p)); // We still need a string to hold a character literal
+    
+    node->character_literal.data += 2; // Increment past the "#\"
+    node->character_literal.len -= 2;
     return node;
 }
 
@@ -1110,8 +1162,13 @@ static ParserNode *parse_for_expr(Parser *p) {
     //expect(p, T_FOR, "FOR EXPECTED");
     ParserNode *ident = parse_identifier(p); 
     advance(p); // Due to pratt parser need to advance/consume token
-    expect(p, T_IN, "'in' must follow the iterator variable before enumeratable.");
-    ParserNode *iter_expr = parse_expr(p);
+
+    ParserNode *iter_expr = NULL;
+    if (match(p, T_IN)) {
+        expect(p, T_IN, "'in' must follow the iterator variable before enumeratable.");
+        iter_expr = parse_expr(p);
+    }
+
     expect(p, T_LBRACE, "Expected '{' after for condition");    
     ParserNode *body = parse_block(p, T_RBRACE);
 
@@ -1171,8 +1228,6 @@ static ParserNode *parse_return(Parser *p) {
 
     return ret;
 }
-
-
 
 //- (* Blocks *)
 //- block                  = "{" , { statement | newline } , "}" ;

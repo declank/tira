@@ -1,7 +1,7 @@
 
 
 #define X_TOKEN_TYPES \
-    X(INVALID) X(IDENT) X(NUM) X(STRING) X(SEMICOLON) X(COLON) X(DOUBLE_COLON) X(COLON_EQ) \
+    X(INVALID) X(IDENT) X(NUM) X(DOLLAR) X(STRING) X(CHARACTER) X(SEMICOLON) X(COLON) X(DOUBLE_COLON) X(COLON_EQ) \
     X(EQUALS) X(EQEQ) X(NOT_EQ) X(COMMA) X(DOTDOT) X(DOTDOTEQ) X(DOT) X(QUESTION) \
     X(LBRACE) X(RBRACE) X(LSQBRACKET) X(RSQBRACKET) X(LPAREN) X(RPAREN) X(PIPE) \
     X(LOGICAL_OR) X(BITWISE_OR) X(LOGICAL_AND) X(AMPERSAND) X(XOR) X(NOT) \
@@ -224,6 +224,7 @@ Token lex_next(Lexer *L) {
         case ')': { tok.type = T_RPAREN; } break;
         case '[': { tok.type = T_LSQBRACKET; } break;
         case ']': { tok.type = T_RSQBRACKET; } break;
+        case '$': { tok.type = T_DOLLAR; } break;
 
         case '+': { tok.type = T_PLUS; } break;
         case '-': { tok.type = T_MINUS; } break;
@@ -291,6 +292,17 @@ Token lex_next(Lexer *L) {
             }
         } break;
 
+        // Character value
+        // TODO cleanup case: #\space or #\tab nocheckin
+        case '#': {
+            // TODO reset the state if error
+            if (lex_peek(L) == '\\') {
+                tok.type = T_CHARACTER;
+                lex_advance(L);
+                lex_advance(L); 
+            }
+        } break;
+
         // Strings
         case '"': {
             while_lex(lex_peek(L) != '"');
@@ -298,6 +310,7 @@ Token lex_next(Lexer *L) {
             tok.type = T_STRING;
         } break;
 
+        // Compile time directive
         case '%': {
             // modulo
             tok.type = T_PERCENT;

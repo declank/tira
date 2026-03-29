@@ -40,7 +40,7 @@ static uint16_t bytecode[4096];
 static uint16_t code_size = 0;
 
 typedef struct {
-    void (*func)(int64_t);
+    int64_t (*func)(int64_t);
 } FuncEntry;
 
 
@@ -147,7 +147,7 @@ void bootstrap_codegen_inner(ParserNode *node) {
     }
 }
 
-void tira_rt__puts(int64_t val); // TODO cleanup this forward declaration or refactor these to capture required funcs
+int64_t tira_rt__puts(int64_t val); // TODO cleanup this forward declaration or refactor these to capture required funcs
 
 void bootstrap_codegen(Parser *p) {
     function_table[0] = (FuncEntry) {
