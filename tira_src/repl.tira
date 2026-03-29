@@ -2,25 +2,6 @@
 
 var history = []
 
-// Callback behaviour:
-// completion is called on <TAB>
-// hints is called on typing
-
-//func completion(buf, completions) {
-//    if buf[0] == #\h {
-//        completions.add("hello")
-//        completions.add("hello there")
-//    }
-//}
-//
-//func hints(buf, color, bold) {
-//    if buf.ic_cmp("hello") == 0 {
-//        color.val = 35
-//        bold.val = 0
-//    }
-//    return nil
-//}
-
 // eval, gets, print and puts are implemented in the runtime
 
 main {
@@ -37,7 +18,7 @@ main {
         } else if input == "history" {
             for history { print(it) }
         } else {
-            history.append(line)
+            append(history, line)
             puts(eval(input)) // eval calls into the runtime
         }
     }

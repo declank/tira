@@ -13,4 +13,9 @@ typedef int32_t b32;
 #define countof(x) (size_t)(sizeof(x) / sizeof(*(x)))
 #define lengthof(x) (countof(x) - 1)
 
+//----- Tira runtime types and macro/function helpers
+//----- 
 typedef int64_t TiraVal;
+#define TIRA_FALSE 0
+#define TIRA_TRUE  1
+

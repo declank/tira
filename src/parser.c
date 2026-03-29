@@ -931,7 +931,7 @@ static ParserNode *parse_index(Parser *p, ParserNode *lhs) {
     PRINT_FUNC_NAME;
 
     // Setting this context-sensitive feature for referring to length of an array within [] for slicing
-    //p->context_sensitive_within_array_index = true; // TODO need to handle case such as a[b[$]] - Yes use the lhs as context
+    //p->context_sensitive_within_array_index = true; // TODO need to handle case such as a[b[$]] - use a stack!
     p->context_sensitive_within_array_index = lhs;
     ParserNode *node = new_node(p, NODE_INDEX);
     node->index.base = lhs;

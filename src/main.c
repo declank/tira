@@ -16,6 +16,7 @@
 #include "bootstrap_codegen.c"
 #include "compiler.c"
 #include "runtime.c"
+#include "vm.c"
 
 int main(int argc, const char *argv[]) {
     (void) argc;

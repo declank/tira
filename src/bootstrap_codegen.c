@@ -56,22 +56,44 @@ typedef struct {
 static FuncEntry function_table[256];
 static ArrayLiteralEntry array_literal_table[256];
 static String string_table[256];
+static TiraVal var_table[256];
 
 static uint16_t var_slots = 0;
+static uint16_t arr_slots = 0;
+static uint16_t arr_slots_capacity = 256;
 
 enum {
     BYOP_NOP,
     BYOP_LOADK,
     BYOP_LOADK_INT,
+    BYOP_LOAD_ARRAY,
+
+    BYOP_ADD,
+    BYOP_SUB,
+    BYOP_MUL,
+    BYOP_DIV,
+
     BYOP_ADD_INT,
     BYOP_SUB_INT,
     BYOP_MUL_INT,
     BYOP_DIV_INT,
+
     BYOP_CALL,
     BYOP_IS_NIL,
-    BYOP_STRING_EQUAL_TO,
+
+    BYOP_EQUAL_TO,
+    BYOP_NOT_EQUAL_TO,
+    BYOP_EQUAL_TO_STRING,
+    BYOP_NOT_EQUAL_TO_STRING,
+    
+    BYOP_LOGICAL_AND,
+    BYOP_LOGICAL_OR,
+
     BYOP_LOGICAL_AND_BOOL,
     BYOP_LOGICAL_OR_BOOL,
+    
+    BYOP_SET_TRUE,
+    BYOP_SET_FALSE,
 };
 
 void bytecode_emit_16(uint16_t val) {
@@ -97,23 +119,71 @@ uint16_t get_func_slot(ParserNode *callee) {
     return 0;
 }
 
+TiraVal *alloc_cg_array(size_t count) {
+    return NULL;
+}
+
+uint16_t add_array_literal_to_table(Node_ArrayLiteral arr) {
+    assert(arr_slots < arr_slots_capacity - 1);
+    ArrayLiteralEntry *entry = &array_literal_table[arr_slots++];
+    entry->count = arr.count;
+
+    // allocate and copy elements
+    entry->members = alloc_cg_array(arr.count);
+    memcpy(entry->members, arr.elems, arr.count);
+
+    return 0;
+}
+
 void bootstrap_codegen_inner(ParserNode *node) {
     uint16_t target_slot, lhs_slot, rhs_slot, func_slot;
 
     intptr_t int_value;
+    b8 bool_value;
     uint16_t func_arg_count, arg_slot_start;
 
     switch (node->kind) {
         case NODE_VAR_DECL: {
             ParserNode *rhs = node->const_var_decl.rhs;
             //assert(node->const_var_decl.rhs->kind == NODE_NUMBER);
-            if (rhs->kind != NODE_NUMBER) break;
-            target_slot = var_slots++;
-            int_value = node->const_var_decl.rhs->int_value;
+            //if (rhs->kind != NODE_NUMBER) break;
+            
+            switch (rhs->kind) {
+                case NODE_NUMBER: {
+                    target_slot = var_slots++;
+                    int_value = node->const_var_decl.rhs->int_value;
 
-            printf("LOADK_INT %uh %lld\n", target_slot, int_value);
-            bytecode_emit_16(BYOP_LOADK_INT);
-            bytecode_emit_16(target_slot); bytecode_emit_64(int_value);
+                    printf("LOADK_INT %uh %lld\n", target_slot, int_value);
+                    bytecode_emit_16(BYOP_LOADK_INT);
+                    bytecode_emit_16(target_slot); bytecode_emit_64(int_value);
+                } break;
+
+                case NODE_BOOL: {
+                    bool_value = node->const_var_decl.rhs->bool_value;
+                    if (bool_value == true) {
+                        printf("SET_TRUE %uh\n", target_slot);
+                        bytecode_emit_16(BYOP_SET_TRUE); bytecode_emit_16(target_slot);
+                    } else {
+                        printf("SET_FALSE %uh\n", target_slot);
+                        bytecode_emit_16(BYOP_SET_FALSE); bytecode_emit_16(target_slot);
+                    }
+                } break;
+
+                case NODE_ARRAY_LITERAL: {
+                    Node_ArrayLiteral array_literal = node->const_var_decl.rhs->array_literal;
+                    uint16_t array_literal_slot = add_array_literal_to_table(array_literal);
+
+                    printf("LOAD_ARRAY %uh %uh\n", target_slot, array_literal_slot);
+                    bytecode_emit_16(BYOP_LOAD_ARRAY);
+                    bytecode_emit_16(target_slot); bytecode_emit_16(array_literal_slot);
+                }
+
+                default: {
+                    error("== not implemented for RHS kind: %S\n", node_kind_strings[rhs->kind]);
+                } break;
+            }
+            
+            
         } break;
 
         case NODE_BINARY_OP: {
@@ -158,11 +228,14 @@ void bootstrap_codegen_inner(ParserNode *node) {
 
                         case NODE_STRING: {
                             printf("STRING_EQUAL_TO %uh %uh %uh", target_slot, lhs_slot, rhs_slot);
-                            bytecode_emit_16(BYOP_STRING_EQUAL_TO);
+                            bytecode_emit_16(BYOP_EQUAL_TO_STRING);
                             bytecode_emit_16(target_slot); bytecode_emit_16(lhs_slot); bytecode_emit_16(rhs_slot);
                         } break;
 
-                        default: assert(0); break;
+                        default: {
+                            error("== not implemented for RHS kind: %S\n", node_kind_strings[rhs_kind]);
+                            assert(0);
+                        } break;
                     }
                     
                 } break;
