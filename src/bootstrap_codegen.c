@@ -30,8 +30,71 @@ call f0 1 2
 Decision needs to be made regarding closures and lexical variables referenced up particular frames,
 or the use of dynamic binding if used.
 
+// We can reorder history and input value slots on a first pass (essentially marking them as "dirty"),
+// but we can't change the order later, e.g. we can mark the value slots as "reordered" as we go
+// For that case where we would want multiple passes, it may be better to transform the IR first into a binary tree.
+
+// The same applies for inferring the type information:
+// we can do this for: 
+//  - running(bool)
+//  - history(array[any] or array[String|nil] if it were local)
+//  - input(String|nil)
+//  - it(Any or String|nil)
+// we can't infer the type for input where it is guaranteed to be a string unless we have another pass
+
+// Without introducing type annotations into the language, we want to be able to determine types from set variables,
+// and from calls to builtin functions. Annotations at this stage would add complexity the parser which I could do without
+// for now.
+
+// AST -> Annotatable binary tree IR -> register-based VM bytecode
+// TreeIR
+// Bytecode
+
+For the flat IR then we have a sketch of what the slots may look like:
+
+// g0 = history = []
+
+// v0 = "tira repl"
+// v1 = "ctrl+c to exit"
+// v2 = "> "
+// v3 = "exit"
+// v4 = "history"
+
+// v5 = running // bool
+// v6 = history // array[any]
+// v7 = input   // string | nil
+// v8 = it      // any?
+
+// v9 = temp...
+
+Sample flat opcode:
+
+// CALL puts v0 1 discard
+// CALL puts v1 1 discard
+// for_1_cond:
+// JMP_FALSE__BOOL running for_1_end           
+// for_1_body:
+// CALL print v2 1
+// CALL gets 0 0 v7
+// JMP_IF_NIL v7 if_1_0
+// JMP_IF_EQ__STR v7 v3 if_1_0
+// JMP_IF_EQ__STR v7 v4 if_1_1
+// JMP if_1_2
+// if_1_0:
+// SET_FALSE v5
+// if_1_1:
+// ITER_NEXT v6 v8 for_1_cond
+// CALL print v8 1 discard
+// if_1_2:
+// CALL append v6 2 discard
+// CALL eval v7 1 temp
+// CALL puts v9 1 discard
+// for_1_end:
+// RET
+
 */
 
+#include "parser.c"
 #include "string.h"
 int bytecode_disasm(uint16_t *bytecode, char ***disasm, size_t *instruction_count) {
     
@@ -123,7 +186,7 @@ void bytecode_emit_64(uint64_t val) {
 }
 
 uint16_t get_func_slot(ParserNode *callee) {
-    // TODO change to hashes nocheckin
+    // TODO change to hashes
     String id_str = callee->identifier.str;
     if (0);
     else if (string_compare(id_str, S("puts")) == 0) { return 0; }
@@ -386,6 +449,58 @@ TiraVal tira_rt__eval(int64_t input);
 TiraVal tira_rt__print(void);
 TiraVal tira_rt__append(TiraVal arr, TiraVal elem);
 
+enum {
+    TIR_INVALID,
+    TIR_COMMA,
+    TIR_CALL,
+    TIR_JMP,
+    TIR_JMP_COND,
+    TIR_IS_TRUE,
+    TIR_IS_FALSE,
+    TIR_IS_EQ,
+    TIR_ITER_NEXT,
+    TIR_RET,
+} /* TreeIREntryKind */;
+
+typedef uint32_t TreeIREntryKind;
+
+typedef struct {
+    TreeIREntryKind kind;
+    uint32_t lhs;
+    uint32_t rhs;
+    uint32_t cond;
+} TreeIREntry;
+
+TreeIREntry tree_ir_nodes[1024];
+uint32_t tree_ir_code_size = 0;
+
+void bootstrap_codegen_treeir(Node_FuncDecl func_decl) {
+    printf(__FUNCTION__);
+    printf("\n");
+    InternedStr identifier = func_decl.identifier->identifier;
+    FuncData *func_data = func_decl.func_data;
+    ParserNode **stmts = func_decl.block->block.stmts;
+    uint32_t stmts_count = func_decl.block->block.statements_count;
+
+    for (uint32_t i = 0; i < stmts_count; i++) {
+        print(node_kind_strings[stmts[i]->kind]);
+        printf("\n");
+    }
+    
+
+
+}
+
+/*
+Overall structure of this is AST -> TreeIR -> Flattened IR
+The TreeIR should allow for then the following operations:
+
+1. Formation and modification of basic blocks/phony nodes
+2. Propagation or data flow analysis around type information
+
+*/
+
+
 void bootstrap_codegen(Parser *p) {
     function_table[0] = (FuncEntry) { .func = tira_rt__puts };
     function_table[1] = (FuncEntry) { .func = tira_rt__gets };
@@ -393,10 +508,29 @@ void bootstrap_codegen(Parser *p) {
     function_table[3] = (FuncEntry) { .func = tira_rt__print };
     function_table[4] = (FuncEntry) { .func = tira_rt__append };
 
-    for (uint32_t i = 0; i < p->node_count; i++) {
+    /* for (uint32_t i = 0; i < p->node_count; i++) {
         ParserNode *node = &p->nodes[i];
         bootstrap_codegen_inner(node);
+    } */
+
+    printf("===========\n");
+    printf(" CODEGEN!! \n");
+    printf("===========\n");
+
+    ParserNode *main_block = NULL;
+    for (uint32_t i = 0; i < p->node_count; i++) {
+        ParserNode *stmt = &p->nodes[i];
+        //print(node_kind_strings[stmt->kind]);
+        //printf("\n");
+
+        // This needs to be done per function
+        if (stmt->kind == NODE_FUNC_DECL) {
+            Node_FuncDecl func_decl = stmt->func_decl;
+            bootstrap_codegen_treeir(func_decl);
+        }
     }
 }
+
+
 
 

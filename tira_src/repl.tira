@@ -9,7 +9,7 @@ main {
     puts("ctrl+c to exit")
 
     var running = true
-    for running {
+    while running {
         print("> ")
         var input = gets()
 
@@ -18,10 +18,12 @@ main {
         } else if input == "history" {
             for history { print(it) }
         } else {
-            append(history, line)
+            append(history, input)
             puts(eval(input)) // eval calls into the runtime
         }
     }
 }
+
+
 
 

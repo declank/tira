@@ -195,8 +195,8 @@ void compiler_parse(Compiler *c) {
     parser->node_cap = 256;
     parser->nodes = new(c->arena, ParserNode, parser->node_cap);
 
-    parser->statement_cap = 256;
-    parser->statements = new(c->arena, uint32_t, parser->statement_cap);
+/*     parser->statement_cap = 256;
+    parser->statements = new(c->arena, uint32_t, parser->statement_cap); */
 
     parser->arena = c->arena;
 
@@ -265,7 +265,7 @@ void debug_print_parser(Compiler *c) {
         //sb_newline(&sb);
     }
     
-    sb_build(&g_sb, S("==========\n"));
+/*     sb_build(&g_sb, S("==========\n"));
     sb_build(&g_sb, S("STATEMENTS:\n"));
 
     for (uint32_t i; i < p.statement_count; i++) {
@@ -274,7 +274,7 @@ void debug_print_parser(Compiler *c) {
         sb_build(&g_sb, (int)node_index);
         sb_build(&g_sb, S(": "));
         debug_print_node_info(p, g_sb, n);
-    }
+    } */
 
     print_sb(g_sb);
 }

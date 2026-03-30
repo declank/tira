@@ -9,7 +9,7 @@
     X(PLUS) X(MINUS) X(ASTERISK) X(SLASH) X(PERCENT) \
     \
     X(VAR) X(CONST) X(IMPORT) X(CFFI) X(FUNC) X(TRUE) X(FALSE) X(RETURN) \
-    X(IF) X(ELSE) X(CASE) X(MAIN) X(FOR) X(IN) \
+    X(IF) X(ELSE) X(CASE) X(MAIN) X(FOR) X(IN) X(WHILE) \
     X(STRUCT) X(NIL) X(TYPE) X(REF) \
     \
     X(EQUALS_RARROW) \
@@ -90,6 +90,7 @@ static TokenType keyword_or_identifier(char *str, size_t n) {
     if (n==3 && !memcmp(str, "ref", 3))     return T_REF;
     if (n==3 && !memcmp(str, "var", 3))     return T_VAR;
     if (n==5 && !memcmp(str, "const", 5))   return T_CONST;
+    if (n==5 && !memcmp(str, "while", 5))   return T_WHILE;
     //if (n==4 && !memcmp(str, "type", 4))    return T_TYPE;
     return T_IDENT;
 }
@@ -287,7 +288,7 @@ Token lex_next(Lexer *L) {
         } break;
 
         // Character value
-        // TODO cleanup case: #\space or #\tab nocheckin
+        // TODO cleanup case: #\space or #\tab
         case '#': {
             // TODO reset the state if error
             if (lex_peek(L) == '\\') {

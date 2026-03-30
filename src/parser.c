@@ -27,7 +27,7 @@ typedef struct {
     X(INVALID) X(NUMBER) X(STRING) X(CHARACTER) X(IDENTIFIER) X(BINARY_OP) X(UNARY) X(VAR_DECL) X(CONST_DECL) \
     X(ASSIGNMENT) X(BLOCK) X(CALL) X(ARRAY_LITERAL) X(FUNC_DECL) X(IF_EXPR) X(RETURN) \
     X(NIL) X(FUNC_CALL) X(INDEX) X(RANGE) X(DOT_ACCESS) X(BOOL) X(AGGREGATE) X(TERNARY) \
-    X(FOR_EXPR) X(CAST) X(PARAM) X(DOLLAR)
+    X(FOR_EXPR) X(WHILE_EXPR) X(CAST) X(PARAM) X(DOLLAR)
 
 #define X(KIND) NODE_##KIND,
 typedef enum { X_PARSER_NODE_KINDS } ParserNodeKind;
@@ -91,6 +91,7 @@ typedef struct { TokenType op; ParserNode *expr; } Node_Unary;
 typedef struct { ParserNode **targets; ParserNode **values; size_t count; } Node_Aggregate;
 typedef struct { ParserNode *cond; ParserNode *then_expr; ParserNode *else_expr; } Node_Ternary;
 typedef struct { ParserNode *ident; ParserNode *iter_expr; ParserNode *block; } Node_ForExpr;
+typedef struct { ParserNode *cond; ParserNode *block; } Node_WhileExpr;
 typedef struct { ParserNode *to_type; } Node_Cast;
 
 // clang-format on
@@ -121,6 +122,7 @@ struct ParserNode { // minimised from 64 to 32 bytes
         Node_ConstVarDecl const_var_decl;
         Node_Ternary ternary;
         Node_ForExpr for_expr;
+        Node_WhileExpr while_expr;
         Node_Cast cast;
     };
 };
@@ -194,9 +196,9 @@ typedef struct {
     uint32_t error_count;
     uint32_t error_cap;
 
-    uint32_t *statements;
+/*     uint32_t *statements;
     uint32_t statement_count;
-    uint32_t statement_cap;
+    uint32_t statement_cap; */
 
     Arena *arena;
 } Parser;
@@ -374,8 +376,8 @@ static ParserNode *new_node(Parser *p, ParserNodeKind kind) {
 }
 
 static void dump_parser_state(Parser *p) {
-    printf("pos=%u, nodes=%u, statements=%u, errors=%u\n",
-        p->pos, p->node_count, p->statement_count, p->error_count);
+    printf("pos=%u, nodes=%u, errors=%u\n",
+        p->pos, p->node_count, p->error_count);
     printf("next token: %s\n", token_type_strings[peek(p)->type].data);
 }
 
@@ -454,6 +456,7 @@ static ParserNode *parse_dot(Parser *p, ParserNode *lhs);
 static ParserNode *parse_assign(Parser *p, ParserNode *lhs);
 static ParserNode *parse_if_expr(Parser *p);
 static ParserNode *parse_for_expr(Parser *p);
+static ParserNode *parse_while_expr(Parser *p);
 static ParserNode *parse_ternary(Parser *p, ParserNode *lhs);
 static ParserNode *parse_comma(Parser *p, ParserNode *lhs);
 static void parse_primary(Parser *p);
@@ -532,6 +535,7 @@ static ParseRule rules[T_COUNT] = {
     [T_IF] = {parse_if_expr, NULL, PREC_NONE},
     //[T_FUNC] = {parse_func_decl, NULL, PREC_NONE},
     [T_FOR] = {parse_for_expr, NULL, PREC_NONE},
+    [T_WHILE] = {parse_while_expr, NULL, PREC_NONE},
     // T_RBRACE and others to catch errors instead of segfault
 };
 
@@ -1182,6 +1186,8 @@ static ParserNode *parse_if_expr(Parser *p) {
 //-
 static ParserNode *parse_for_expr(Parser *p) {
     PRINT_FUNC_NAME;
+    ParserNode *node = new_node(p, NODE_FOR_EXPR);
+
     //expect(p, T_FOR, "FOR EXPECTED");
     ParserNode *ident = parse_identifier(p); 
     advance(p); // Due to pratt parser need to advance/consume token
@@ -1195,12 +1201,27 @@ static ParserNode *parse_for_expr(Parser *p) {
     expect(p, T_LBRACE, "Expected '{' after for condition");    
     ParserNode *block = parse_block(p, T_RBRACE);
 
-    ParserNode *node = new_node(p, NODE_FOR_EXPR);
     node->for_expr.ident = ident;
     node->for_expr.iter_expr = iter_expr;
     node->for_expr.block = block;
     return node;
 }
+
+//- while_expr             = "while", expr, block
+//- 
+static ParserNode *parse_while_expr(Parser *p) {
+    PRINT_FUNC_NAME;
+    ParserNode *node = new_node(p, NODE_WHILE_EXPR);
+    ParserNode* cond = parse_expr(p);
+
+    expect(p, T_LBRACE, "Expected '{' after while condition");
+    ParserNode *block = parse_block(p, T_RBRACE);
+
+    node->while_expr.cond = cond;
+    node->while_expr.block = block;
+    return node;
+}
+
 
 //- (* Terminals *)
 //- identifier             = letter , { letter | digit | "_" } ;
