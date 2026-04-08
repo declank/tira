@@ -99,6 +99,7 @@ typedef struct { ParserNode *to_type; } Node_Cast;
 // e.g. kind | lhs | rhs | (possible extra data) = 16 bytes
 struct ParserNode { // minimised from 64 to 32 bytes 
     ParserNodeKind kind;
+    uint32_t tok_index;
     union {
         double real_value;
         intptr_t int_value;
@@ -196,11 +197,8 @@ typedef struct {
     uint32_t error_count;
     uint32_t error_cap;
 
-/*     uint32_t *statements;
-    uint32_t statement_count;
-    uint32_t statement_cap; */
-
     Arena *arena;
+
 } Parser;
 
 static String token_string(Parser *p, Token *tok) {
@@ -338,6 +336,18 @@ static Token* current(Parser *p) {
     return &p->tokens[p->pos];    
 }
 
+// TODO: below functions seem a little buggy as an approach however it seems generally:
+// prefix rule functions: use previous_token_index
+// infix rule functions: use current_token_index
+
+static uint32_t previous_token_index(Parser *p) {
+    return previous(p) - p->tokens;
+}
+
+static uint32_t current_token_index(Parser *p) {
+    return current(p) - p->tokens;
+}
+
 static Token *expect(Parser *p, TokenType type, const char *msg) {
     (void)msg; // TODO
     Token *next_tok = peek(p);
@@ -357,7 +367,7 @@ static void block_add_stmt(Parser *p, Node_Block *block, ParserNode *stmt) {
     block->stmts[block->statements_count++] = stmt;
 }
 
-static ParserNode *new_node(Parser *p, ParserNodeKind kind) {
+static ParserNode *new_node(Parser *p, ParserNodeKind kind, uint32_t tok_index) {
     print(S(__FUNCTION__));
     print(S(": "));
     print(node_kind_strings[kind]);
@@ -371,6 +381,7 @@ static ParserNode *new_node(Parser *p, ParserNodeKind kind) {
     ParserNode *node = &p->nodes[p->node_count++];
     mem_zero(node);
     node->kind = kind;
+    node->tok_index = tok_index;
     
     return node;
 }
@@ -550,7 +561,7 @@ static ParseRule rules[T_COUNT] = {
 void parse_program(Parser *p) {
     PRINT_FUNC_NAME;
     print(S("{\n\n"));
-    ParserNode *program = new_node(p, NODE_BLOCK);
+    ParserNode *program = new_node(p, NODE_BLOCK, 0); // TODO: cleanup hardcoded 0 or start indexing at 1?
 
     while (peek(p)->type != T_END) {
         if (match(p, T_NEWLINE) || match(p, T_SEMICOLON))
@@ -584,7 +595,8 @@ static ParserNode *parse_const_var_decl(Parser *p, TokenType type) {
 
     assert(type == T_VAR || type == T_CONST);
 
-    ParserNode *node = new_node(p, (type == T_VAR) ? NODE_VAR_DECL : NODE_CONST_DECL);
+    ParserNode *node = new_node(p, (type == T_VAR) ? NODE_VAR_DECL : NODE_CONST_DECL,
+                                previous_token_index(p));
     advance(p);
     ParserNode *identifier = parse_identifier(p);
     
@@ -602,7 +614,7 @@ static ParserNode *parse_const_var_decl(Parser *p, TokenType type) {
 static ParserNode *parse_func_decl(Parser *p) {
     PRINT_FUNC_NAME;
 
-    ParserNode *node = new_node(p, NODE_FUNC_DECL);
+    ParserNode *node = new_node(p, NODE_FUNC_DECL, previous_token_index(p));
     // Advance if identifier (not main)
     match(p, T_IDENT);
     ParserNode *identifier = parse_identifier(p);
@@ -699,7 +711,7 @@ static ParserNode *parse_expr_prec(Parser *p, Precedence prec) {
 //-
 static ParserNode *parse_assign(Parser *p, ParserNode *lhs) {
     PRINT_FUNC_NAME;
-    ParserNode *node = new_node(p, NODE_ASSIGNMENT);
+    ParserNode *node = new_node(p, NODE_ASSIGNMENT, current_token_index(p));
     node->assign.lhs = lhs;
     node->assign.rhs = parse_expr_prec(p, PREC_LOWEST);
 
@@ -779,7 +791,7 @@ static ParserNode *make_multi_assign(Parser *p,
         return NULL;
     }
 
-    ParserNode *node = new_node(p, NODE_AGGREGATE);
+    ParserNode *node = new_node(p, NODE_AGGREGATE, current_token_index(p)); // TODO check
     node->aggregate.targets = targets;
     node->aggregate.values  = values;
     node->aggregate.count   = target_count;
@@ -793,7 +805,7 @@ static ParserNode *parse_ternary(Parser *p, ParserNode *lhs) {
 
     // TODO check that this is properly right-associative?
 
-    ParserNode *node = new_node(p, NODE_TERNARY);
+    ParserNode *node = new_node(p, NODE_TERNARY, current_token_index(p));
 
     node->ternary.cond = lhs;  
     node->ternary.then_expr = parse_expr(p);
@@ -812,7 +824,7 @@ static ParserNode *parse_ternary(Parser *p, ParserNode *lhs) {
 static ParserNode *parse_range(Parser *p, ParserNode *lhs) {
     PRINT_FUNC_NAME;
 
-    ParserNode *node = new_node(p, NODE_RANGE);
+    ParserNode *node = new_node(p, NODE_RANGE, current_token_index(p));
     node->range.lhs = lhs;
     node->range.inclusive = (previous(p)->type == T_DOTDOTEQ);
     node->range.rhs = parse_expr_prec(p, PREC_RANGE);
@@ -832,7 +844,7 @@ static ParserNode *parse_binary(Parser *p, ParserNode *lhs) {
     TokenType binop_token_type = previous(p)->type;
     assert_tokentype_is_binop(binop_token_type);
     
-    ParserNode *node = new_node(p, NODE_BINARY_OP);
+    ParserNode *node = new_node(p, NODE_BINARY_OP, current_token_index(p));
     ParserNode *rhs = parse_expr_prec(p, PREC_FACTOR);
     node->binary_op.op = binop_token_type;
     node->binary_op.lhs = lhs;
@@ -847,7 +859,7 @@ static ParserNode *parse_binary(Parser *p, ParserNode *lhs) {
 //-                        | postfix
 //-
 static ParserNode *parse_unary(Parser *p) {
-    ParserNode *node = new_node(p, NODE_UNARY);
+    ParserNode *node = new_node(p, NODE_UNARY, previous_token_index(p));
     node->unary.op = previous(p)->type;
     node->unary.expr = parse_expr_prec(p, PREC_UNARY);
     return node;
@@ -904,8 +916,9 @@ static void parse_struct_init(Parser *p) {
 
     if (!match(p, T_RBRACE)) {
         do {
-            if (peek(p)->type == T_NEWLINE)
+            if (peek(p)->type == T_NEWLINE) {
                 expect(p, T_NEWLINE, "");
+            }
             expect(p, T_DOT, "");
             expect(p, T_IDENT, "");
             expect(p, T_EQUALS, "");
@@ -925,7 +938,7 @@ static void parse_struct_init(Parser *p) {
 static ParserNode *parse_call(Parser *p, ParserNode *lhs) {
     PRINT_FUNC_NAME;
 
-    ParserNode *node = new_node(p, NODE_FUNC_CALL);
+    ParserNode *node = new_node(p, NODE_FUNC_CALL, previous_token_index(p));
     ParserNode **args = NULL;
     size_t count = 0;
 
@@ -958,7 +971,7 @@ static ParserNode *parse_index(Parser *p, ParserNode *lhs) {
     // Setting this context-sensitive feature for referring to length of an array within [] for slicing
     //p->context_sensitive_within_array_index = true; // TODO need to handle case such as a[b[$]] - use a stack!
     p->context_sensitive_within_array_index = lhs;
-    ParserNode *node = new_node(p, NODE_INDEX);
+    ParserNode *node = new_node(p, NODE_INDEX, previous_token_index(p));
     node->index.base = lhs;
     node->index.index = parse_expr_prec(p, PREC_LOWEST);
     expect(p, T_RSQBRACKET, "Expected ']' after index.");
@@ -971,7 +984,7 @@ static ParserNode *parse_dollar(Parser *p) {
 
     ParserNode *node = NULL;
     if (p->context_sensitive_within_array_index != NULL) {
-        node = new_node(p, NODE_IDENTIFIER);
+        node = new_node(p, NODE_IDENTIFIER, previous_token_index(p));
         Token *tok = previous(p);
         node->identifier = str_intern(p, tok);
     } else {
@@ -987,7 +1000,7 @@ static ParserNode *parse_dollar(Parser *p) {
 static ParserNode *parse_dot(Parser *p, ParserNode *lhs) {
     PRINT_FUNC_NAME;
 
-    ParserNode *node = new_node(p, NODE_DOT_ACCESS);
+    ParserNode *node = new_node(p, NODE_DOT_ACCESS, current_token_index(p));
     node->dot_access.lhs = lhs;
 
     Token *member = expect(p, T_IDENT, "Expected member name after '.'.");
@@ -1052,7 +1065,7 @@ static ParserNode *parse_grouping(Parser *p) {
 //- float_lit              = {digits, ".", digits} | {digits, "."} | {".", digits}
 
 static ParserNode *parse_number(Parser *p) {
-    ParserNode *node = new_node(p, NODE_NUMBER);
+    ParserNode *node = new_node(p, NODE_NUMBER, previous_token_index(p));
 
     Token *tok = previous(p);
     char *start = p->source.data + tok->start;
@@ -1076,7 +1089,7 @@ static ParserNode *parse_number(Parser *p) {
 static ParserNode *parse_character(Parser *p) {
     PRINT_FUNC_NAME;
 
-    ParserNode *node = new_node(p, NODE_CHARACTER);
+    ParserNode *node = new_node(p, NODE_CHARACTER, previous_token_index(p));
     node->character_literal = token_string(p, previous(p)); // We still need a string to hold a character literal
     node->character_literal.data += 2; // Increment past the "#\"
     node->character_literal.len -= 2;
@@ -1087,7 +1100,7 @@ static ParserNode *parse_character(Parser *p) {
 static ParserNode *parse_string(Parser *p) {
     PRINT_FUNC_NAME;
 
-    ParserNode *node = new_node(p, NODE_STRING);
+    ParserNode *node = new_node(p, NODE_STRING, previous_token_index(p));
     node->string = token_string(p, previous(p));
     return node;
 }
@@ -1095,14 +1108,14 @@ static ParserNode *parse_string(Parser *p) {
 //- nil                    = "nil"
 static ParserNode *parse_nil(Parser *p) {
     PRINT_FUNC_NAME;
-    return new_node(p, NODE_NIL);
+    return new_node(p, NODE_NIL, previous_token_index(p));
 }
 
 //- bool_lit               = "true" | "false"
 //- 
 static ParserNode *parse_bool(Parser *p) {
     PRINT_FUNC_NAME;
-    ParserNode *node = new_node(p, NODE_BOOL);
+    ParserNode *node = new_node(p, NODE_BOOL, previous_token_index(p));
     node->bool_value = previous(p)->type == T_TRUE;
     return node;
 }
@@ -1113,7 +1126,7 @@ static ParserNode *parse_bool(Parser *p) {
 static ParserNode *parse_array_lit(Parser *p) {
     PRINT_FUNC_NAME;
 
-    ParserNode *node = new_node(p, NODE_ARRAY_LITERAL);
+    ParserNode *node = new_node(p, NODE_ARRAY_LITERAL, previous_token_index(p));
     ParserNode **elems = NULL;
     size_t count = 0;
 
@@ -1148,6 +1161,7 @@ static ParserNode *parse_array_lit(Parser *p) {
 //- if_expr                = "if", expr, block, ["else", (if_expr | block)]
 static ParserNode *parse_if_expr(Parser *p) {
     PRINT_FUNC_NAME;
+    ParserNode *node = new_node(p, NODE_IF_EXPR, previous_token_index(p));
     ParserNode *cond = parse_expr(p);
 
     skip_newlines(p);
@@ -1174,7 +1188,6 @@ static ParserNode *parse_if_expr(Parser *p) {
         p->pos = saved_pos;
     }
 
-    ParserNode *node = new_node(p, NODE_IF_EXPR);
     node->if_expr.cond = cond;
     node->if_expr.then_branch = then_branch;
     node->if_expr.else_branch = else_branch;
@@ -1186,7 +1199,7 @@ static ParserNode *parse_if_expr(Parser *p) {
 //-
 static ParserNode *parse_for_expr(Parser *p) {
     PRINT_FUNC_NAME;
-    ParserNode *node = new_node(p, NODE_FOR_EXPR);
+    ParserNode *node = new_node(p, NODE_FOR_EXPR, previous_token_index(p));
 
     //expect(p, T_FOR, "FOR EXPECTED");
     ParserNode *ident = parse_identifier(p); 
@@ -1211,7 +1224,7 @@ static ParserNode *parse_for_expr(Parser *p) {
 //- 
 static ParserNode *parse_while_expr(Parser *p) {
     PRINT_FUNC_NAME;
-    ParserNode *node = new_node(p, NODE_WHILE_EXPR);
+    ParserNode *node = new_node(p, NODE_WHILE_EXPR, previous_token_index(p));
     ParserNode* cond = parse_expr(p);
 
     expect(p, T_LBRACE, "Expected '{' after while condition");
@@ -1228,7 +1241,7 @@ static ParserNode *parse_while_expr(Parser *p) {
 static ParserNode *parse_identifier(Parser *p) {
     PRINT_FUNC_NAME;
 
-    ParserNode *node = new_node(p, NODE_IDENTIFIER);
+    ParserNode *node = new_node(p, NODE_IDENTIFIER, previous_token_index(p));
     Token *tok = previous(p);
     node->identifier = str_intern(p, tok);
 
@@ -1266,7 +1279,7 @@ static ParserNode *parse_stmt(Parser *p) {
 static ParserNode *parse_return(Parser *p) {
     PRINT_FUNC_NAME;
     
-    ParserNode *ret = new_node(p, NODE_RETURN);
+    ParserNode *ret = new_node(p, NODE_RETURN, previous_token_index(p));
     ParserNode *expr = parse_expr(p);
     ret->ret.expr = expr;
 
@@ -1278,7 +1291,7 @@ static ParserNode *parse_return(Parser *p) {
 //- 
 static ParserNode *parse_block(Parser *p, TokenType block_end) {
     PRINT_FUNC_NAME;
-    ParserNode *block = new_node(p, NODE_BLOCK);
+    ParserNode *block = new_node(p, NODE_BLOCK, previous_token_index(p));
 
     // while (peek(p)->type != T_END) {
     while (peek(p)->type != block_end) {

@@ -9,7 +9,7 @@
             "type": "lldb",
             "request": "launch",
             "program": "${workspaceRoot}/build/tira",
-            "args": ["tira_src/repl.tira"],
+            "args": ["test_source.tira"],
             "cwd": "${workspaceRoot}",
             "preLaunchTask": "build",
             "terminal": "console",       // use the debug console

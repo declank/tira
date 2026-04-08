@@ -4,15 +4,15 @@
 #include <stddef.h>
 #include <stdarg.h>
 
-#include "common.h"
-#include "memory.c"
-#include "string.c"
-#include "platform.h"
-#include "print.c"
-#include "lexer.c"
-#include "parser.c"
-#include "bootstrap_codegen.c"
-#include "compiler.c"
+#include "../src/common.h"
+#include "../src/memory.c"
+#include "../src/string.c"
+#include "../src/platform.h"
+#include "../src/print.c"
+#include "../src/lexer.c"
+#include "../src/parser.c"
+#include "../src/bootstrap_codegen.c"
+#include "../src/compiler.c"
 
 typedef struct Test Test;
 struct Test {
@@ -182,6 +182,10 @@ int test_bytecode_generation(void) {
     return TEST_SUCCESS;
 }
 
+int test_semantic_analysis(void) {
+    return TEST_FAILED;
+}
+
 ///// End of tests /////
 
 #define RUN_TEST(test) do { tests_failed += test; } while(0)
@@ -194,6 +198,7 @@ int main(int argc, const char *argv[]) {
     RUN_TEST(test_printf());
     RUN_TEST(test_parser());
     RUN_TEST(test_bytecode_generation());
+    RUN_TEST(test_semantic_analysis());
 
     if (tests_failed) {
         error("%d tests failed!!!\n", tests_failed);

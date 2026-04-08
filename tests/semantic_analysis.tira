@@ -1,0 +1,25 @@
+
+
+func double(x) { return x * x }
+
+main {
+    a = 50 // error variable not declared
+    var test5 = test3 + 50 // allowed
+    var test1 = 2000 // error variable is shadowed
+
+    for test1 in [1,2,3] { // error variable is shadowed
+        
+    }
+
+    return double(test1*test2)
+}
+
+var test1 = 5000
+var test2 = 39283
+
+var test3 = test1 + test2 // mathematical operations allowed for known constants
+test_not_declared = test3 + 50 // error only declarations top-level
+
+// Comptime later
+var test6 = double(5) // error cannot run
+

@@ -11,6 +11,7 @@ typedef enum {
     STAGE_INITIALIZED,
     STAGE_LEXED,
     STAGE_PARSED,
+    STAGE_SEMANTIC,
     STAGE_CODEGEN,
     STAGE_RAN,
 } CompileStage;
@@ -19,6 +20,8 @@ typedef struct {
     CompileStage stage;
     Lexer lexer;
     Parser parser;
+    SemanticAnalyzer sema;
+
     uint16_t *bytecode;
     size_t bytecode_size;
     Arena *arena;
@@ -279,18 +282,20 @@ void debug_print_parser(Compiler *c) {
     print_sb(g_sb);
 }
 
-void compiler_codegen(Compiler *c) {
+void compiler_semantic(Compiler *c) {
     assert(c->stage == STAGE_PARSED);
-    c->stage = STAGE_CODEGEN;
+    c->stage = STAGE_SEMANTIC;
 
-    bootstrap_codegen(&c->parser);
+    c->sema.parser = &c->parser;
+    c->sema.arena = c->arena;
+    c->sema.entities_cap = 256;
+
+    c->sema.entities = new(c->arena, SemanticEntity, c->sema.entities_cap);
+
+    semantic1(&c->sema);
 }
 
 void vm_run(void); // Forward declaration for vm.c
 
-void compiler_run(Compiler *c) {
-    assert(c->stage == STAGE_CODEGEN);
-    c->stage = STAGE_RAN;
-    vm_run();
-}
+
 

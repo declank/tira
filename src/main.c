@@ -13,10 +13,9 @@
 #include "print.c"
 #include "lexer.c"
 #include "parser.c"
-#include "bootstrap_codegen.c"
+#include "semantic_ir.c"
 #include "compiler.c"
 #include "runtime.c"
-#include "vm.c"
 
 int main(int argc, const char *argv[]) {
     (void) argc;
@@ -49,11 +48,12 @@ int main(int argc, const char *argv[]) {
     compiler_parse(&c);
     print(S("==========\n"));
     debug_print_parser(&c);
- 
-    compiler_codegen(&c);
     print(S("==========\n"));
-    compiler_run(&c);
-    
+
+
+    compiler_semantic(&c);
+    print(S("==========\n"));
+
     return 0;
 }
 
