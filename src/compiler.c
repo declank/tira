@@ -282,7 +282,7 @@ void debug_print_parser(Compiler *c) {
     print_sb(g_sb);
 }
 
-void compiler_semantic(Compiler *c) {
+void compiler_semantic_ir(Compiler *c) {
     assert(c->stage == STAGE_PARSED);
     c->stage = STAGE_SEMANTIC;
 

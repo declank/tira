@@ -51,7 +51,7 @@ int main(int argc, const char *argv[]) {
     print(S("==========\n"));
 
 
-    compiler_semantic(&c);
+    compiler_semantic_ir(&c);
     print(S("==========\n"));
 
     return 0;

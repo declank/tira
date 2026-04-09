@@ -5,7 +5,7 @@
 
 #include "memory.h"
 
-typedef enum {
+/* typedef enum {
     BIF_invalid,
     BIF_append,
 } BuiltinFuncID;
@@ -16,7 +16,7 @@ typedef enum {
     BIPROP_count,
     BIPROP_flat_count,
     BIPROP_type,
-} BuiltinPropertyID;
+} BuiltinPropertyID; */
 
 void raise_semantic_error(const char* err_msg) {
     error(err_msg);
@@ -79,6 +79,7 @@ b32 nodekind_is_literal(ParserNodeKind kind) {
         case NODE_BOOL:
         case NODE_NIL:
             return true;
+
         default:
             return false;
     }
@@ -98,14 +99,29 @@ SemanticEntity *get_semantic_entity(SemanticContext *ctx, ParserNode *node) {
 bool check_var_decl_rhs_constexpr(SemanticContext *ctx, SemanticEntity *var_decl) {
     ParserNode *rhs = var_decl->node->const_var_decl.rhs;
 
+    if (rhs == NULL) {
+        raise_semantic_error("There is no right-hand side.");
+        return false;
+    }
+
     if (nodekind_is_literal(rhs->kind)) {
         var_decl->is_rhs_constexpr = true;
     } else {
         //var_decl->is_rhs_constexpr = check_if_constexpr(ctx, get_semantic_entity(ctx, rhs));
         switch (rhs->kind) {
-            case NODE_BINARY_OP: {
-                
+            case NODE_ARRAY_LITERAL: {
+                var_decl->is_rhs_constexpr = true;
+                for (uint32_t i = 0 ; i < rhs->array_literal.count; i++) {
+                    if (!nodekind_is_literal(rhs->array_literal.elems[i]->kind)) {
+                        var_decl->is_rhs_constexpr = false;
+                        break;
+                    }
+                }
             } break;
+
+            default: {
+                assert(0);
+            }
         }
     }
 
@@ -151,7 +167,7 @@ void semantic1(SemanticAnalyzer *sema) {
 
             default: {
                 print(kind_str);
-                raise_semantic_error("%S is not a valid node at top-level.\n");
+                raise_semantic_error("%S is not a valid node at top-level.");
             } break;
         }
     }
@@ -191,32 +207,6 @@ void semantic2(SemanticAnalyzer *sema) {
             } break;
         }
     }
-
-    /* for (uint32_t i = 0; i < top_level_block.statements_count; i++) {
-        ParserNode *top_level_node = top_level_block.stmts[i];
-        StartEndMarker marker = {0};
-
-        if (top_level_block.stmts[i]->kind == NODE_FUNC_DECL) {
-            Node_FuncDecl func_decl = top_level_block.stmts[i]->func_decl;
-            get_start_end_of_block(sema->parser, top_level_node, &marker);
-
-            // Iterate over the block
-            for (uint32_t i = marker.start; i < marker.end; i++) {
-                ParserNode func_stmt_node = sema->parser->nodes[i];
-                ParserNodeKind kind = func_stmt_node.kind;
-
-                switch (kind) {
-                    case NODE_VAR_DECL: {
-                        printf("VAR_DECL in "); print(func_decl.identifier->string);
-                        printf(": ");
-                        print(func_stmt_node.const_var_decl.identifier->string);
-                        printf("\n");
-
-                    } break;
-                }
-            }
-        }        
-    } */
 }
 
 

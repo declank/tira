@@ -262,3 +262,6 @@ int mainCRTStartup(void) {
     int ret = main(argc, argv);
     ExitProcess(ret);
 }
+
+// TODO stack trace handler as per platform_linux.c
+

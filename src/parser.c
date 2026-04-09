@@ -386,6 +386,14 @@ static ParserNode *new_node(Parser *p, ParserNodeKind kind, uint32_t tok_index) 
     return node;
 }
 
+static ParserNode *invalid_node(Parser *p, Token *tok) {
+    // Creates a stub invalid node instead of the parse functions returning NULL
+    // Avoids checks for NULL everywhere
+
+    ParserNode *err_node = new_node(p, NODE_INVALID, tok - p->tokens);
+    return err_node;
+}
+
 static void dump_parser_state(Parser *p) {
     printf("pos=%u, nodes=%u, errors=%u\n",
         p->pos, p->node_count, p->error_count);
@@ -594,11 +602,13 @@ static ParserNode *parse_const_var_decl(Parser *p, TokenType type) {
     PRINT_FUNC_NAME;
 
     assert(type == T_VAR || type == T_CONST);
-
     ParserNode *node = new_node(p, (type == T_VAR) ? NODE_VAR_DECL : NODE_CONST_DECL,
                                 previous_token_index(p));
     advance(p);
     ParserNode *identifier = parse_identifier(p);
+
+    // type annotation
+
     
     ParserNode *rhs = NULL;
     if (match(p, T_EQUALS)) rhs = parse_expr(p);
@@ -692,7 +702,7 @@ static ParserNode *parse_expr_prec(Parser *p, Precedence prec) {
     ParseRule *rule = &rules[token->type];
     if (!rule->prefix) {
         raise_error(p, "Expected expression.\n");
-        return NULL;
+        return invalid_node(p, token);
     }
 
     ParserNode *lhs = rule->prefix(p);
@@ -788,7 +798,7 @@ static ParserNode *make_multi_assign(Parser *p,
     // check first the target count and value count is the same
     if (target_count != value_count) {
         raise_error(p, "multi-assign mismatch: %d targets but %d values");
-        return NULL;
+        return invalid_node(p, current(p));
     }
 
     ParserNode *node = new_node(p, NODE_AGGREGATE, current_token_index(p)); // TODO check
@@ -1134,7 +1144,7 @@ static ParserNode *parse_array_lit(Parser *p) {
         do {
             if (peek(p)->type == T_RSQBRACKET)
                 break; // case of trailing comma (however what about) [,]
-            elems = realloc_array(p->arena, elems, ParserNode *, count + 1);
+            elems = realloc_array(p->arena, elems, ParserNode *, count + 1); // TODO check cases for NULL returned
             elems[count++] = parse_expr_prec(p, PREC_HIGHEST);
         } while (match(p, T_COMMA));
     }
@@ -1298,7 +1308,8 @@ static ParserNode *parse_block(Parser *p, TokenType block_end) {
         if (match(p, T_NEWLINE) || match(p, T_SEMICOLON))
             continue;
         ParserNode *stmt = parse_stmt(p);
-        block_add_stmt(p, &block->block, stmt);
+        if (stmt)
+            block_add_stmt(p, &block->block, stmt);
 
         if (match(p, T_NEWLINE) || match(p, T_SEMICOLON))
             continue;

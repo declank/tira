@@ -65,27 +65,15 @@ void *realloc_array_(Arena *a, void *base, size_t elem_size, size_t align, size_
 
     size_t capacity = next_capacity(count);
     void *new_ptr = alloc(a, elem_size, align, capacity);
-    /* if (base) */ memcpy(new_ptr, base, elem_size * count);
+    if (base != NULL) memcpy(new_ptr, base, elem_size * count);
     return new_ptr;
 }
 
 void *memcpy(void *restrict dest, const void *restrict src, size_t count) {
-    if (dest == NULL || src == NULL) return NULL;
-
-    size_t n = count;
     uint8_t *d = dest;
     const uint8_t *s = src;
-    
-    // Need to handle overlapping memory regions
-    if (d > s && d < s + n) {
-	d += n - 1;
-        s += n - 1;
-        while (n--) *d-- = *s++;
-    } else {
-        while (n--) *d++ = *s++;
-    }
-
-    return dest;    
+    while (count--) *d++ = *s++;
+    return dest;
 }
 
 void* memzero(void *ptr, size_t count) {

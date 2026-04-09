@@ -21,6 +21,7 @@
 #define SYS_fstat 5
 #define SYS_mmap 9
 #define SYS_mprotect 10
+#define SYS_sigaction 13
 #define SYS_exit 60
 
 static inline long syscall1(long n, long a1) {
@@ -57,6 +58,17 @@ static inline long syscall3(long n, long a1, long a2, long a3) {
                      : "rcx", "r11", "memory" // clobbered by syscall
     );
 
+    return ret;
+}
+
+static inline long syscall4(long n, long a1, long a2, long a3, long a4) {
+    long ret;
+    register long r10 __asm__("r10") = a4;
+
+    __asm__ volatile("syscall"
+                     : "=a"(ret)
+                     : "a"(n), "D"(a1), "S"(a2), "d"(a3), "r"(r10)
+                     : "rcx", "r11", "memory");
     return ret;
 }
 
@@ -246,6 +258,8 @@ int main(int argc, const char *argv[]);
     exit(ret);
 } */
 
+#define STACK_TRACE_HANDLER
+
 __attribute__((naked)) void _start(void) {
     __asm__ volatile (
         ".intel_syntax noprefix\n"
@@ -253,9 +267,187 @@ __attribute__((naked)) void _start(void) {
         "mov  rdi, [rsp]\n"
         "lea  rsi, [rsp + 8]\n"
         "and  rsp, -16\n"
+#ifdef STACK_TRACE_HANDLER
+// We need to push argc/argv onto the stack and pop later before call to main
+        "push rdi\n"
+        "push rsi\n"
+        "call set_signal_handler\n"
+        "pop  rsi\n"
+        "pop  rdi\n"
+#endif
         "call main\n"
         "mov  edi, eax\n"
         "call exit\n"
     );
 }
+
+
+
+
+
+#ifdef STACK_TRACE_HANDLER
+
+#define MAX_BACKTRACE_LINES 64
+
+int error(const char *fmt, ...); // Forward declaration needed referring to print.c
+
+int backtrace(void **buffer, int size) {
+    return 0; // TODO
+}
+
+char **backtrace_symbols(void **buffer, int size) {
+    return NULL;
+}
+
+void print_stacktrace(void) {
+    void *buffer[MAX_BACKTRACE_LINES];
+    char **symbols;
+
+	int nptrs = backtrace(buffer, MAX_BACKTRACE_LINES);
+	symbols = backtrace_symbols(buffer, nptrs);
+	if(symbols == NULL)	{
+		error("backtrace_symbols\n");
+		exit(1);
+	}
+
+    // start at 2 to exclude this function and handler()
+	for(uint32_t i = 2; i < (uint32_t) (nptrs-2); ++i) {
+		//if addr2line failed, print what we can
+		error("[%i] %s\n", nptrs-2-i-1, symbols[i]);
+	}
+
+    // TODO free symbols
+}
+
+#define SIGHUP           1
+#define SIGINT           2
+#define SIGQUIT          3
+#define SIGILL           4
+#define SIGTRAP          5
+#define SIGABRT          6
+#define SIGIOT           6
+#define SIGBUS           7
+#define SIGFPE           8
+#define SIGKILL          9
+#define SIGUSR1         10
+#define SIGSEGV         11
+#define SIGUSR2         12
+#define SIGPIPE         13
+#define SIGALRM         14
+#define SIGTERM         15
+#define SIGSTKFLT       16
+#define SIGCHLD         17
+#define SIGCONT         18
+#define SIGSTOP         19
+#define SIGTSTP         20
+#define SIGTTIN         21
+#define SIGTTOU         22
+#define SIGURG          23
+#define SIGXCPU         24
+#define SIGXFSZ         25
+#define SIGVTALRM       26
+#define SIGPROF         27
+#define SIGWINCH        28
+#define SIGIO           29
+#define SIGPOLL         SIGIO
+/*
+#define SIGLOST         29
+*/
+#define SIGPWR          30
+#define SIGSYS          31
+#define SIGUNUSED       31
+
+
+void handler(int signal) {
+    print_stacktrace();
+
+    switch (signal) {
+        case SIGTERM: 
+            error("SIGTERM: termination request, sent to the program\n");
+            break;
+        case SIGSEGV:
+            error("SIGSEGV: invalid memory access (segmentation fault)\n");
+            break;
+        case SIGINT:
+            error("SIGINT: external interrupt, usually initiated by the user\n");
+            break;
+        case SIGILL:
+            error("SIGILL: invalid program image, such as invalid instruction\n");
+            break;
+        case SIGABRT:
+            error("SIGABRT: abnormal termination condition, as is e.g. initiated by abort()\n");
+            break;
+        case SIGFPE:
+            error("SIGFPE: erroneous arithmetic operation such as divide by zero\n");
+            break;
+        default:
+            error("Another signal triggered, value: %d\n", signal);
+            break;
+    }
+
+    exit(1);
+}
+
+__attribute__((used, naked)) // needed so that it is not compiled out and prologue/epilogue is correct
+static void sig_restorer(void) {
+    // syscall: rt_sigreturn = 15
+    __asm__ volatile (
+        "mov $15, %%rax\n"
+        "syscall\n"
+        ::: "rax"
+    );
+}
+
+/* static int sys_sigaction(int signum, const struct sigaction *act, struct sigaction *oldact) {
+    int ret;
+    __asm__ volatile (
+        "syscall"
+        : "=a"(ret)
+        : "0"(13),          // rt_sigaction = 13
+          "D"(signum),
+          "S"(act),
+          "d"(oldact),
+          "r"((uint64_t)8)  // sigsetsize = 8
+        : "rcx", "r11", "memory"
+    );
+    return ret;
+} */
+typedef void (*__sighandler_t) (int);
+
+typedef struct {
+    __sighandler_t sa_handler;
+    unsigned long sa_flags;
+    void (*sa_restorer)(void);
+    uint64_t sa_mask;
+} KernelSigaction;
+
+int sigaction(int sig, KernelSigaction *act, KernelSigaction *oldact) {
+    uint64_t sigsetsize = 8;
+    return (int)syscall4(SYS_sigaction, (long)sig, (long)act, (long)oldact, sigsetsize);
+}
+
+#define SA_RESTORER	0x04000000 // TODO should use something else or import, base image addr?
+
+void set_signal_handler(void) {
+    KernelSigaction sa = {
+        .sa_handler  = handler,
+        .sa_flags    = SA_RESTORER,
+        .sa_restorer = sig_restorer,
+        .sa_mask     = 0,
+    };
+
+    int ret; // for debugging
+
+    ret |= sigaction(SIGTERM, &sa, 0);
+    ret |= sigaction(SIGSEGV, &sa, 0);
+    ret |= sigaction(SIGINT, &sa, 0);
+    ret |= sigaction(SIGILL, &sa, 0);
+    ret |= sigaction(SIGABRT, &sa, 0);
+    ret |= sigaction(SIGFPE, &sa, 0);
+    ret |= sigaction(SIGTERM, &sa, 0);
+    ret |= sigaction(SIGTERM, &sa, 0);
+    ret |= sigaction(SIGTERM, &sa, 0);
+
+}
+#endif
 
