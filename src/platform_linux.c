@@ -306,8 +306,8 @@ void print_stacktrace(void) {
 	int nptrs = backtrace(buffer, MAX_BACKTRACE_LINES);
 	symbols = backtrace_symbols(buffer, nptrs);
 	if(symbols == NULL)	{
-		error("backtrace_symbols\n");
-		exit(1);
+		error("print_stacktrace to be implemented\n");
+		exit(1); // TODO
 	}
 
     // start at 2 to exclude this function and handler()
@@ -398,20 +398,6 @@ static void sig_restorer(void) {
     );
 }
 
-/* static int sys_sigaction(int signum, const struct sigaction *act, struct sigaction *oldact) {
-    int ret;
-    __asm__ volatile (
-        "syscall"
-        : "=a"(ret)
-        : "0"(13),          // rt_sigaction = 13
-          "D"(signum),
-          "S"(act),
-          "d"(oldact),
-          "r"((uint64_t)8)  // sigsetsize = 8
-        : "rcx", "r11", "memory"
-    );
-    return ret;
-} */
 typedef void (*__sighandler_t) (int);
 
 typedef struct {
@@ -444,10 +430,6 @@ void set_signal_handler(void) {
     ret |= sigaction(SIGILL, &sa, 0);
     ret |= sigaction(SIGABRT, &sa, 0);
     ret |= sigaction(SIGFPE, &sa, 0);
-    ret |= sigaction(SIGTERM, &sa, 0);
-    ret |= sigaction(SIGTERM, &sa, 0);
-    ret |= sigaction(SIGTERM, &sa, 0);
-
 }
 #endif
 

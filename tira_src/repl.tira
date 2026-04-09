@@ -1,6 +1,6 @@
 #!/usr/bin/env tira
 
-var history = []
+var history: []String
 
 // eval, gets, print and puts are implemented in the runtime
 
@@ -18,7 +18,7 @@ main {
         } else if input == "history" {
             for history { print(it) }
         } else {
-            append(history, input)
+            history.append(input)
             puts(eval(input)) // eval calls into the runtime
         }
     }
