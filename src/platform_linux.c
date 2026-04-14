@@ -2,6 +2,7 @@
 #define _GNU_SOURCE // for MAP_ANONYMOUS
 
 #include <fcntl.h>
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <sys/mman.h>
@@ -22,7 +23,24 @@
 #define SYS_mmap 9
 #define SYS_mprotect 10
 #define SYS_sigaction 13
+#define SYS_madvise 28
 #define SYS_exit 60
+#define SYS_clock_gettime 228
+
+#define CLOCK_REALTIME           0
+#define CLOCK_MONOTONIC          1
+#define CLOCK_PROCESS_CPUTIME_ID 2
+#define CLOCK_THREAD_CPUTIME_ID  3
+#define CLOCK_MONOTONIC_RAW      4
+#define CLOCK_REALTIME_COARSE    5
+#define CLOCK_MONOTONIC_COARSE   6
+#define CLOCK_BOOTTIME           7
+#define CLOCK_REALTIME_ALARM     8
+#define CLOCK_BOOTTIME_ALARM     9
+#define CLOCK_SGI_CYCLE         10
+#define CLOCK_TAI               11
+
+#define MADV_DONTNEED   4
 
 static inline long syscall1(long n, long a1) {
     long ret;
@@ -112,7 +130,14 @@ ssize_t write(int fd, const void *buf, size_t count) {
 }
 
 int open(const char *path, int flags, ... /* mode_t mode */) {
-    return (int)syscall3(SYS_open, (long)path, flags, 0);
+    int mode = 0;
+    if (flags & O_CREAT) {
+        va_list ap;
+        va_start(ap, flags);
+        mode = va_arg(ap, int);
+        va_end(ap);
+    }
+    return (int)syscall3(SYS_open, (long)path, flags, mode);
 }
 
 int fstat(int fd, struct stat *statbuf) {
@@ -146,18 +171,31 @@ void print(String s) {
 
 void print_char(char c) { write(STDOUT_FILENO, &c, 1); }
 
-FileBuf platform_read_entire_file(String path, Arena *arena) {
-    FileBuf result = {0};
+int open_file(const char *filename) {
+    return open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+}
+
+int write_to_file(int fd, char *buf, size_t buf_size) {
+    return write(fd, buf, buf_size);
+}
+
+int close_file(int fd) {
+    return close(fd);
+}
+
+int platform_read_entire_file(FileBuf *buf, String path, Arena *arena) {
+    //FileBuf result = {0};
+    if (buf == NULL) return 0;
 
     // open(path, O_RDONLY)
     int fd = open(path.data, O_RDONLY);
     if (fd < 0)
-        return result;
+        return 0;
 
     struct stat st;
     if (fstat(fd, &st) < 0) {
         close(fd);
-        return result;
+        return 0;
     }
 
     size_t size = st.st_size;
@@ -167,7 +205,7 @@ FileBuf platform_read_entire_file(String path, Arena *arena) {
         __builtin_trap();
 
         close(fd);
-        return result;
+        return 0;
     }
 
     // read entire file
@@ -184,9 +222,9 @@ FileBuf platform_read_entire_file(String path, Arena *arena) {
     close(fd);
 
     buffer[size] = 0;
-    result.data = (char*)buffer;
-    result.len = total;
-    return result;
+    buf->data = (char*)buffer;
+    buf->len = total;
+    return 1;
 }
 
 // for macOS or other UNIX systems that have this
@@ -216,6 +254,14 @@ int getchar(void) {
     return buf[0];    
 }
 
+int madvise(void *addr, size_t size, int advice) {
+    return syscall3(SYS_madvise, (long)addr, (long)size, (long)advice);
+}
+
+int mem_dont_need(void *addr, size_t size) {
+    return madvise(addr, size, MADV_DONTNEED);
+}
+
 //__attribute__((noreturn))
 _Noreturn
 void __assert_fail(const char *assertion,
@@ -240,6 +286,14 @@ void __assert_fail(const char *assertion,
 
     exit(1);
     //__builtin_unreachable();
+}
+
+// TODO: this needs to be changed to use vDSO instead of a syscall!
+Time clock_time_monotonic_raw(void) {
+    Time time;
+
+    syscall2(SYS_clock_gettime, CLOCK_MONOTONIC_RAW, (long)&time);
+    return time;
 }
 
 #define MAX_ARGS 64
@@ -433,3 +487,115 @@ void set_signal_handler(void) {
 }
 #endif
 
+// EXPERIMENTAL CODE NOT TO BE USED. Exploring vDSO (Linux virtual Dynamic Shared Objects).
+// It's a way of accessing some functions present in the kernel that are copied to userspace
+// but that can also be called from userspace: e.g. clock_gettimeofday
+
+// When it comes to process startup the Linux kernel adds an "aux vector" (auxv) on the stack above argc/argv
+// https://articles.manugarg.com/aboutelfauxiliaryvectors
+// https://berthub.eu/articles/posts/on-linux-vdso-and-clockgettime/
+
+/*
+
+position            content                     size (bytes) + comment
+  ------------------------------------------------------------------------
+  stack pointer ->  [ argc = number of args ]     4
+                    [ argv[0] (pointer) ]         4   (program name)
+                    [ argv[1] (pointer) ]         4
+                    [ argv[..] (pointer) ]        4 * x
+                    [ argv[n - 1] (pointer) ]     4
+                    [ argv[n] (pointer) ]         4   (= NULL)
+
+                    [ envp[0] (pointer) ]         4
+                    [ envp[1] (pointer) ]         4
+                    [ envp[..] (pointer) ]        4
+                    [ envp[term] (pointer) ]      4   (= NULL)
+
+                    [ auxv[0] (Elf32_auxv_t) ]    8
+                    [ auxv[1] (Elf32_auxv_t) ]    8
+                    [ auxv[..] (Elf32_auxv_t) ]   8
+                    [ auxv[term] (Elf32_auxv_t) ] 8   (= AT_NULL vector)
+
+                    [ padding ]                   0 - 16
+
+                    [ argument ASCIIZ strings ]   >= 0
+                    [ environment ASCIIZ str. ]   >= 0
+
+  (0xbffffffc)      [ end marker ]                4   (= NULL)
+
+  (0xc0000000)      < bottom of stack >           0   (virtual)
+  ------------------------------------------------------------------------
+
+*/
+
+// Or simply:
+// stack layout at _start:
+// rsp+0:  argc
+// rsp+8:  argv[0..argc]
+// rsp+8*(argc+1): NULL
+// then envp[], NULL
+// then auxv[]
+
+/*
+typedef struct {
+    uint64_t type;
+    uint64_t value;
+} AuxEntry;
+
+#define AT_SYSINFO_EHDR 33  // vDSO base address
+
+void *find_vdso(uint64_t *sp) {
+    uint64_t argc = *sp;
+    char **argv = (char **)(sp + 1);
+    char **envp = argv + argc + 1;
+    
+    // skip envp
+    char **e = envp;
+    while (*e++) {}
+    
+    AuxEntry *aux = (AuxEntry *)e;
+    while (aux->type != 0) {
+        if (aux->type == AT_SYSINFO_EHDR)
+            return (void *)aux->value;
+        aux++;
+    }
+    return NULL;
+}
+
+#include <elf.h> // or define the structs yourself
+
+typedef long (*clock_gettime_fn)(int, struct timespec *);
+
+clock_gettime_fn find_clock_gettime(void *vdso_base) {
+    Elf64_Ehdr *ehdr = vdso_base;
+    Elf64_Shdr *shdrs = vdso_base + ehdr->e_shoff;
+    
+    Elf64_Shdr *dynsym = NULL;
+    Elf64_Shdr *dynstr = NULL;
+    
+    for (int i = 0; i < ehdr->e_shnum; i++) {
+        if (shdrs[i].sh_type == SHT_DYNSYM)
+            dynsym = &shdrs[i];
+        if (shdrs[i].sh_type == SHT_STRTAB && i != ehdr->e_shstrndx)
+            dynstr = &shdrs[i];
+    }
+    
+    if (!dynsym || !dynstr) return NULL;
+    
+    Elf64_Sym *syms = vdso_base + dynsym->sh_offset;
+    char *strtab    = vdso_base + dynstr->sh_offset;
+    int nsyms       = dynsym->sh_size / sizeof(Elf64_Sym);
+    
+    for (int i = 0; i < nsyms; i++) {
+        char *name = strtab + syms[i].st_name;
+        if (str_eq(name, "__vdso_clock_gettime"))
+            return (clock_gettime_fn)(vdso_base + syms[i].st_value);
+    }
+    return NULL;
+}
+
+clock_gettime_fn vdso_clock_gettime = find_clock_gettime(vdso_base);
+struct timespec ts;
+vdso_clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
+
+*/

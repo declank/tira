@@ -14,7 +14,6 @@
 //- Grammar specification may inaccurately reflect the language implementation, and is meant to be a rough guide.
 //- 
 
-
 */
 
 typedef struct {
@@ -70,23 +69,33 @@ typedef struct { InternedStr name; InternedStr type; } Param;
 typedef struct { InternedStr name; } TypeParam;
 typedef struct { Param *params; int params_count; InternedStr ret; } FuncData;
 
-typedef struct {
+/* typedef struct {
     TypeQualifier qualifier;
     InternedStr type_name;
+} TypeInfo; */
+
+typedef enum {
+    TI_UNDETERMINED,
+    TI_i64,
+    TI_f64,
+    TI_nil,
+    TI_String,
+    TI_bool,
+    TI_ARR_OF_STRING, // TODO: factor in a way to handle complex types
 } TypeInfo;
 
-typedef struct { ParserNode **stmts; Param *params; uint16_t statements_count; uint16_t params_count; } Node_Block;
+typedef struct { ParserNode **stmts; Param *params; uint16_t statements_count; uint16_t statements_cap; uint16_t params_count; } Node_Block;
 typedef struct { ParserNode *identifier; ParserNode *block; FuncData *func_data; } Node_FuncDecl;
 typedef struct { ParserNode *callee; ParserNode **args; size_t args_count; } Node_FuncCall;
 typedef struct { ParserNode *expr; } Node_Return;
-typedef struct { ParserNode *identifier; ParserNode *rhs; TypeInfo *type_info; } Node_ConstVarDecl;
+typedef struct { ParserNode *identifier; ParserNode *rhs; /* TypeInfo *type_decl; */ } Node_ConstVarDecl;
 typedef struct { ParserNode *lhs; ParserNode *rhs; } Node_Assign;
 typedef struct { ParserNode **elems; size_t count; ParserNode *length_expr; } Node_ArrayLiteral;
 typedef struct { TokenType op; ParserNode *lhs; ParserNode *rhs; } Node_BinaryOp;
 typedef struct { ParserNode *cond; ParserNode *then_branch; ParserNode *else_branch; } Node_IfExpr;
 typedef struct { ParserNode *base; ParserNode *index; } Node_Index;
 typedef struct { ParserNode *lhs; ParserNode *rhs; b8 inclusive; } Node_Range;
-typedef struct { ParserNode *lhs; Token *member; } Node_DotAccess;
+typedef struct { ParserNode *lhs; size_t member_tok_index; } Node_DotAccess;
 typedef struct { TokenType op; ParserNode *expr; } Node_Unary;
 typedef struct { ParserNode **targets; ParserNode **values; size_t count; } Node_Aggregate;
 typedef struct { ParserNode *cond; ParserNode *then_expr; ParserNode *else_expr; } Node_Ternary;
@@ -94,11 +103,42 @@ typedef struct { ParserNode *ident; ParserNode *iter_expr; ParserNode *block; } 
 typedef struct { ParserNode *cond; ParserNode *block; } Node_WhileExpr;
 typedef struct { ParserNode *to_type; } Node_Cast;
 
+typedef uint32_t ParserNodeIndex;
+typedef uint32_t LexerTokenIndex; // move to lexer.c
+typedef uint32_t ExtraDataIndex;
+typedef uint32_t TypeInfoIndex;
+
+
+struct ParserNode2 {
+    ParserNodeKind kind;
+    
+    ParserNodeIndex lhs;
+    ParserNodeIndex rhs;
+    ParserNodeIndex parent;
+    
+    LexerTokenIndex tok;
+    TypeInfoIndex ty;
+    ExtraDataIndex extra;
+};
+
 // clang-format on
 // TODO: Move to using uint32_t indices instead of pointers
-// e.g. kind | lhs | rhs | (possible extra data) = 16 bytes
-struct ParserNode { // minimised from 64 to 32 bytes 
+// e.g. kind | ty | lhs | rhs | (possible extra data) = 20 bytes + 4 bytes padding = 24
+struct ParserNode { // minimised from 64 to 40 bytes 
     ParserNodeKind kind;
+    ParserNodeIndex parent;
+
+    /*
+    ParserNodeIndex lhs;
+    ParserNodeIndex rhs;
+    ParserNodeIndex parent;
+    LexerTokenIndex tok;
+
+    TypeInfo ty;
+    ExtraDataIndex extra;
+    */
+
+    TypeInfo ty;
     uint32_t tok_index;
     union {
         double real_value;
@@ -183,7 +223,7 @@ typedef struct {
     String source;
     uint32_t pos;
 
-    ParserNode* context_sensitive_within_array_index; // TODO replace with node index
+    ParserNode* context_sensitive_within_array_index; // TODO replace with node index or a state stack
 
     // Taken from the lexer
     Token *tokens;
@@ -197,7 +237,11 @@ typedef struct {
     uint32_t error_count;
     uint32_t error_cap;
 
-    Arena *arena;
+    Arena *misc_arena;
+    Arena *nodes_arena;
+    Arena *stmts_arena;
+
+    ParserNode **top_level_decls; // TODO: do this here instead of a semantic1 pass
 
 } Parser;
 
@@ -257,11 +301,15 @@ typedef enum {
     ST_FUNC,
 } ScopeType;
 
-#define PRINT_FUNC_NAME                                                        \
-    do {                                                                       \
-        print(S(__FUNCTION__));                                                \
-        print(S("\n"));                                                        \
+#ifdef DEBUG
+#define PRINT_FUNC_NAME \
+    do { \
+        print(S(__FUNCTION__)); \
+        print(S("\n")); \
     } while (0)
+#else
+#define PRINT_FUNC_NAME
+#endif
 
 typedef enum {
     PREC_NONE,
@@ -362,28 +410,45 @@ static Token *expect(Parser *p, TokenType type, const char *msg) {
 }
 
 static void block_add_stmt(Parser *p, Node_Block *block, ParserNode *stmt) {
-    block->stmts = 
-        realloc_array(p->arena, block->stmts, ParserNode*, block->statements_count + 1);
+    if (block->statements_count >= block->statements_cap) {
+        uint32_t new_cap = next_capacity(block->statements_cap);
+        block->stmts = realloc_array(p->stmts_arena, block->stmts, ParserNode*, 
+                                     block->statements_cap, new_cap);
+        block->statements_cap = new_cap;
+    }
     block->stmts[block->statements_count++] = stmt;
 }
 
-static ParserNode *new_node(Parser *p, ParserNodeKind kind, uint32_t tok_index) {
+static ParserNode *new_expression_node(Parser *p, ParserNodeIndex parent, ParserNodeKind kind, uint32_t tok_index) {
+#ifdef DEBUG
     print(S(__FUNCTION__));
     print(S(": "));
     print(node_kind_strings[kind]);
     print(S("\n"));
+#endif
 
     if (p->node_count >= p->node_cap) {
-        raise_error(p, "Exceeded node count in parser.");
-        exit(1);
+        uint64_t new_cap = p->node_cap * 2;
+        p->nodes = realloc_array(p->nodes_arena, p->nodes, ParserNode, p->node_cap, new_cap);
+        p->node_cap = new_cap;
+
+        if (p->nodes == NULL) {
+            error("Unable to allocate more memory in parser\n");
+            exit(1);
+        }
     }
 
     ParserNode *node = &p->nodes[p->node_count++];
     mem_zero(node);
     node->kind = kind;
     node->tok_index = tok_index;
+    node->parent = parent;
     
     return node;
+}
+
+static ParserNode *new_node(Parser *p, ParserNodeKind kind, uint32_t tok_index) {
+    return new_expression_node(p, 0, kind, tok_index);
 }
 
 static ParserNode *invalid_node(Parser *p, Token *tok) {
@@ -568,8 +633,12 @@ static ParseRule rules[T_COUNT] = {
 //- 
 void parse_program(Parser *p) {
     PRINT_FUNC_NAME;
-    print(S("{\n\n"));
+
     ParserNode *program = new_node(p, NODE_BLOCK, 0); // TODO: cleanup hardcoded 0 or start indexing at 1?
+    uint32_t estimated_stmts = p->token_count / 8;
+    program->block.stmts = new(p->stmts_arena, ParserNode*, estimated_stmts);
+    program->block.statements_cap = estimated_stmts;
+
 
     while (peek(p)->type != T_END) {
         if (match(p, T_NEWLINE) || match(p, T_SEMICOLON))
@@ -578,17 +647,13 @@ void parse_program(Parser *p) {
         ParserNode *stmt = parse_stmt(p);
         block_add_stmt(p, &program->block, stmt);
 
-        //getchar();
-
-        print(S("\n"));
-
         if (peek(p)->type == T_END)
             break;
         if (!match(p, T_NEWLINE) && !match(p, T_SEMICOLON))        
             raise_error(p, "No newline at end of statement\n");
     }
 
-    print(S("}\n"));
+    //print(S("}\n"));
 
     if (p->error_count) {
         console_error("Errors found in parsing.\n", 25);
@@ -639,7 +704,7 @@ static ParserNode *parse_func_decl(Parser *p) {
         advance(p);
 
         do {
-            params = realloc_array(p->arena, params, Param, params_count + 1);
+            params = realloc_array(p->misc_arena, params, Param, params_count, params_count + 1); // TODO for cases consider using scratch!
             params[params_count++] = parse_param(p);
         } while (match(p, T_COMMA));
 
@@ -647,7 +712,7 @@ static ParserNode *parse_func_decl(Parser *p) {
     }
 
 
-    FuncData *func_data = new(p->arena, FuncData, 1);
+    FuncData *func_data = new(p->misc_arena, FuncData, 1);
     func_data->params = params;
     func_data->params_count = params_count;
     func_data->ret = (InternedStr){0};
@@ -696,8 +761,10 @@ static ParserNode *parse_expr_prec(Parser *p, Precedence prec) {
     PRINT_FUNC_NAME;
 
     Token *token = advance(p);
+#ifdef DEBUG
     print(token_type_strings[token->type]);
     print(S("\n"));
+#endif
 
     ParseRule *rule = &rules[token->type];
     if (!rule->prefix) {
@@ -752,12 +819,13 @@ was coming, whereas collect_rhs_tuple starts fresh after the =.
 static int collect_lhs_tuple(Parser *p, ParserNode *first, ParserNode **targets) {
     PRINT_FUNC_NAME;
 
-    ParserNode **nodes = new(p->arena, ParserNode*, 1);
+    ParserNode **nodes = new(p->misc_arena, ParserNode*, 1);
     int len = 0;
     nodes[len++] = first;
 
     do {
-        nodes = realloc_array(p->arena, nodes, ParserNode*, len++);
+        nodes = realloc_array(p->misc_arena, nodes, ParserNode*, len, len+1);
+        len++;
         if (nodes == NULL) {
             // run out of memory
             return 0;
@@ -777,10 +845,10 @@ static int collect_lhs_tuple(Parser *p, ParserNode *first, ParserNode **targets)
 static int collect_rhs_tuple(Parser *p, ParserNode **values) {
     PRINT_FUNC_NAME;
 
-    ParserNode **nodes = new(p->arena, ParserNode*, 1);
+    ParserNode **nodes = new(p->misc_arena, ParserNode*, 1);
     int len = 0;
     do {
-        nodes = realloc_array(p->arena, nodes, ParserNode*, len); // This won't resize on case first iteration where 1 is used?
+        nodes = realloc_array(p->misc_arena, nodes, ParserNode*, len, len+1); // This won't resize on case first iteration where 1 is used?
         if (nodes == NULL) {
             // run out of memory
             return 0;
@@ -956,7 +1024,7 @@ static ParserNode *parse_call(Parser *p, ParserNode *lhs) {
         do {
             // TODO: What about pushing elements into a dynamic array in
             // general?
-            args = realloc_array(p->arena, args, ParserNode *, count + 1);
+            args = realloc_array(p->misc_arena, args, ParserNode *, count, count + 1);
             args[count++] = parse_expr_prec(p, PREC_COMMA);
         } while (match(p, T_COMMA));
     }
@@ -1014,7 +1082,7 @@ static ParserNode *parse_dot(Parser *p, ParserNode *lhs) {
     node->dot_access.lhs = lhs;
 
     Token *member = expect(p, T_IDENT, "Expected member name after '.'.");
-    node->dot_access.member = member;
+    node->dot_access.member_tok_index = previous_token_index(p);
     return node;
 }
 
@@ -1026,9 +1094,9 @@ static void parse_primary(Parser *p) {
     PRINT_FUNC_NAME;
 
     Token *t = peek(p);
-    print(S("parse_primary Token type: "));
-    print(token_type_strings[t->type]);
-    print_char('\n');
+    //print(S("parse_primary Token type: "));
+    //print(token_type_strings[t->type]);
+    //print_char('\n');
 
     switch (t->type) {
         case T_NUM:
@@ -1083,8 +1151,10 @@ static ParserNode *parse_number(Parser *p) {
 
     if (memchr(start, '.', tok->length)) {
         ok = string_to_double((String){.data = start, .len = tok->length}, &node->real_value);
+        if (ok) node->ty = TI_f64;
     } else {
         ok = string_to_int64((String){.data = start, .len = tok->length}, &node->int_value);
+        if (ok) node->ty = TI_i64;
     }
 
     if (!ok) {
@@ -1112,6 +1182,7 @@ static ParserNode *parse_string(Parser *p) {
 
     ParserNode *node = new_node(p, NODE_STRING, previous_token_index(p));
     node->string = token_string(p, previous(p));
+    node->ty = TI_String;
     return node;
 }
 
@@ -1127,6 +1198,7 @@ static ParserNode *parse_bool(Parser *p) {
     PRINT_FUNC_NAME;
     ParserNode *node = new_node(p, NODE_BOOL, previous_token_index(p));
     node->bool_value = previous(p)->type == T_TRUE;
+    node->ty = TI_bool;
     return node;
 }
 
@@ -1144,7 +1216,7 @@ static ParserNode *parse_array_lit(Parser *p) {
         do {
             if (peek(p)->type == T_RSQBRACKET)
                 break; // case of trailing comma (however what about) [,]
-            elems = realloc_array(p->arena, elems, ParserNode *, count + 1); // TODO check cases for NULL returned
+            elems = realloc_array(p->misc_arena, elems, ParserNode *, count, count + 1); // TODO check cases for NULL returned
             elems[count++] = parse_expr_prec(p, PREC_HIGHEST);
         } while (match(p, T_COMMA));
     }
@@ -1272,7 +1344,32 @@ static ParserNode *parse_identifier(Parser *p) {
 //-                        | main_block
 //-                        | return_stmt
 //-                        | expr_stmt
+typedef ParserNode *(*StmtParseFn)(Parser *);
+
+static inline ParserNode *parse_const_var_decl_var(Parser *p) {
+    return parse_const_var_decl(p, T_VAR);
+}
+
+static inline ParserNode *parse_const_var_decl_const(Parser *p) {
+    return parse_const_var_decl(p, T_CONST);
+}
+
+static const StmtParseFn stmt_dispatch[T_COUNT] = {
+    [T_RETURN] = parse_return,
+    [T_FUNC]   = parse_func_decl,
+    [T_MAIN]   = parse_main_decl,
+    [T_VAR]    = parse_const_var_decl_var,
+    [T_CONST]  = parse_const_var_decl_const,
+};
+
 static ParserNode *parse_stmt(Parser *p) {
+    StmtParseFn fn = stmt_dispatch[peek(p)->type];
+    if (fn) { advance(p); return fn(p); }
+    return parse_expr(p);
+}
+
+
+/* static ParserNode *parse_stmt(Parser *p) {
     PRINT_FUNC_NAME;
 
     //if (match(p, T_FOR))    return parse_for_stmt(p);
@@ -1281,8 +1378,9 @@ static ParserNode *parse_stmt(Parser *p) {
     if (match(p, T_MAIN))   return parse_main_decl(p);
     if (match(p, T_VAR))    return parse_const_var_decl(p, T_VAR);
     if (match(p, T_CONST))  return parse_const_var_decl(p, T_CONST);
-    else                    return parse_expr(p);
-}
+    
+    return parse_expr(p);
+} */
 
 //- return_stmt            = "return" , [expr]
 //-

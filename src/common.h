@@ -19,3 +19,11 @@ typedef int64_t TiraVal;
 #define TIRA_FALSE 0
 #define TIRA_TRUE  1
 
+#ifdef __GNUC__
+    #define LIKELY(x)   __builtin_expect(!!(x), 1)
+    #define UNLIKELY(x) __builtin_expect(!!(x), 0)
+#else
+    #define LIKELY(x)   (x)
+    #define UNLIKELY(x) (x)
+#endif
+

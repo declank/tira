@@ -1,22 +1,6 @@
 
 
-// We need a notion of built-in functions or intrinsic functions
-// Lower-case convention used to match the names in source
-
 #include "memory.h"
-
-/* typedef enum {
-    BIF_invalid,
-    BIF_append,
-} BuiltinFuncID;
-
-typedef enum {
-    BIPROP_invalid,
-    BIPROP_rawptr,
-    BIPROP_count,
-    BIPROP_flat_count,
-    BIPROP_type,
-} BuiltinPropertyID; */
 
 void raise_semantic_error(const char* err_msg) {
     error(err_msg);
@@ -54,24 +38,6 @@ typedef struct {
 } SemanticContext;
 
 
-void new_semantic_entity(SemanticAnalyzer *sema, ParserNode* node) {
-    sema->entities = realloc_array(sema->arena, sema->entities, SemanticEntity, sema->entities_count + 1);
-    SemanticEntity *e = &sema->entities[sema->entities_count++];
-    mem_zero(e);
-
-    switch (node->kind) {
-        case NODE_VAR_DECL:
-            e->kind = SE_VAR_DECL;
-            break;
-
-        case NODE_FUNC_DECL:
-            e->kind = SE_FUNC_DECL;
-            break;
-    }
-
-    e->node = node;
-}
-
 b32 nodekind_is_literal(ParserNodeKind kind) {
     switch (kind) {
         case NODE_NUMBER:
@@ -87,7 +53,7 @@ b32 nodekind_is_literal(ParserNodeKind kind) {
 
 // Semantic entities are identifiers, not literals
 bool check_if_constexpr(SemanticContext *ctx, SemanticEntity *entity) {
-    
+    return false;
 }
 
 SemanticEntity *get_semantic_entity(SemanticContext *ctx, ParserNode *node) {
@@ -128,6 +94,8 @@ bool check_var_decl_rhs_constexpr(SemanticContext *ctx, SemanticEntity *var_decl
     if (!var_decl->is_rhs_constexpr) {
         raise_semantic_error("Variable declaration right-hand side cannot be evaluated to a constant.");
     }
+
+    return var_decl->is_rhs_constexpr;
 }
 
 void check_func_decl(SemanticContext *ctx, SemanticEntity *func_decl) {
@@ -162,7 +130,7 @@ void semantic1(SemanticAnalyzer *sema) {
         switch (kind) {
             case NODE_VAR_DECL:
             case NODE_FUNC_DECL:
-                new_semantic_entity(sema, top_level.stmts[i]);
+                //new_semantic_entity(sema, top_level.stmts[i]);
                 break;
 
             default: {

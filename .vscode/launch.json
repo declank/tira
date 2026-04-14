@@ -8,8 +8,8 @@
             "name": "Launch",
             "type": "lldb",
             "request": "launch",
-            "program": "${workspaceRoot}/build/tira",
-            "args": ["test_source.tira"],
+            "program": "${workspaceRoot}/build/tira_debug",
+            "args": ["tira_src/repl.tira"],
             "cwd": "${workspaceRoot}",
             "preLaunchTask": "build",
             "terminal": "console",       // use the debug console

@@ -1,6 +1,8 @@
 
 
 #include "memory.h"
+#include "platform.h"
+#include <stdint.h>
 
 Arena arena_create(size_t size) {
     return arena_create_ex(size, mem_alloc);
@@ -42,7 +44,12 @@ void *alloc(Arena *a, size_t size, size_t align, size_t count) {
     uintptr_t aligned = (base + (align - 1)) & ~(uintptr_t)(align - 1);
     size_t new_used = (aligned - (uintptr_t)a->base) + total;
 
-    if (new_used > a->size) return NULL;
+    if (new_used > a->size) { // Arena out of memory
+        error("Arena out of memory\n");
+        //__asm__ volatile("int3");
+        exit(1);
+        return NULL;
+    }
     a->used = new_used;
     return (void *) aligned;
 }
@@ -52,6 +59,7 @@ static inline size_t next_capacity(size_t count) {
     return count ? count * 2 : 1;
 }
 
+#if 0
 void *realloc_array_(Arena *a, void *base, size_t elem_size, size_t align, size_t count) {
     uint8_t *arena_top = a->base + a->used;
     uint8_t *array_end = (uint8_t *)base + elem_size * count;
@@ -67,6 +75,80 @@ void *realloc_array_(Arena *a, void *base, size_t elem_size, size_t align, size_
     void *new_ptr = alloc(a, elem_size, align, capacity);
     if (base != NULL) memcpy(new_ptr, base, elem_size * count);
     return new_ptr;
+}
+#endif
+
+static inline uintptr_t align_up_pow2(uintptr_t val, uintptr_t align) {
+    return (val + align - 1) & ~(align - 1);
+}
+
+static inline uintptr_t align_down_pow2(uintptr_t val, uintptr_t align) {
+    return val & ~(align - 1);
+}
+
+// TODO remove this performance counter
+static uint64_t realloc_moves = 0;
+
+void *realloc_array_(Arena *a, void *base, size_t elem_size, size_t align, size_t old_count, size_t new_count) {
+    uint8_t *arena_top = a->base + a->used;
+    uint8_t *array_end = (uint8_t *)base + elem_size * old_count;
+    b8 at_top = (base != NULL) && (array_end == arena_top);
+
+    if (at_top) {
+        size_t current = (array_end - (uint8_t*)base) / elem_size;
+        if (new_count > current) alloc(a, elem_size, align, new_count - current);
+        return base;
+    }
+
+    realloc_moves++; // Increment the counter
+    void *new_ptr = alloc(a, elem_size, align, new_count);
+
+    // Initialize these for debugging convienience
+    uintptr_t page_start = 0;
+    uintptr_t page_end   = 0;
+
+    if (base != NULL) {
+        memcpy(new_ptr, base, elem_size * old_count);
+
+        // Release pages from old allocation
+        page_start = align_up_pow2((uintptr_t) base, 4096);
+        page_end   = align_down_pow2((uintptr_t) array_end, 4096);
+
+        if (page_start < page_end)
+            mem_dont_need((void *)page_start, page_end - page_start);
+    }
+
+    return new_ptr;
+}
+
+static void dyn_array_maybe_grow(Arena *a, DynArray *arr, size_t elem_size, size_t align) {
+    if (arr->count < arr->cap) return;
+
+    uint8_t *arena_top = a->base + a->used;
+    uint8_t *array_end = (uint8_t *)arr->ptr + elem_size * arr->cap;
+    b8 at_top = arr->ptr && array_end == arena_top;
+
+    size_t new_cap = next_capacity(arr->cap);
+
+    if (at_top) {
+        alloc(a, elem_size, align, new_cap - arr->cap);
+        arr->cap = new_cap;
+        return;
+    }
+
+    void *new_ptr = alloc(a, elem_size, align, new_cap);
+    if (arr->ptr != NULL) {
+        memcpy(new_ptr, arr->ptr, elem_size * arr->cap);
+
+        uintptr_t page_start = align_up_pow2((uintptr_t)arr->ptr, 4096);
+        uintptr_t page_end   = align_down_pow2((uintptr_t)array_end, 4096);
+
+        if (page_start < page_end)
+            mem_dont_need((void *)page_start, page_end - page_start);
+    }
+
+    arr->ptr = new_ptr;
+    arr->cap = new_cap;
 }
 
 void *memcpy(void *restrict dest, const void *restrict src, size_t count) {

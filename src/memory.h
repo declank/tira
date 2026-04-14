@@ -16,6 +16,18 @@ typedef struct {
     void *start_pos;
 } TempArena;
 
+typedef struct {
+    void *ptr;
+    size_t count;
+    size_t cap;
+} DynArray;
+
+#define dyn_array_push(arena, arr, type) \
+    (dyn_array_maybe_grow((arena), (arr), sizeof(type), _Alignof(type)), \
+    &((type*)(arr)->ptr[(arr)->count++]))
+
+static void dyn_array_maybe_grow(Arena *a, DynArray *arr, size_t elem_size, size_t align);
+
 Arena arena_create_ex(size_t size, void* (*alloc_fn)(size_t));
 
 #define kilobytes(x) ((size_t)(x) * 1024ULL)
@@ -29,7 +41,8 @@ void *mem_alloc(size_t size);
 void *mem_alloc_code(size_t size);
 
 #define new(arena, type, count) (type *)alloc((arena), sizeof(type), _Alignof(type), count)
-#define realloc_array(arena, base, type, count) (type *)realloc_array_((arena), (base), sizeof(type), _Alignof(type), count)
+#define realloc_array(arena, base, type, old_count, new_count) \
+    (type *)realloc_array_((arena), (base), sizeof(type), _Alignof(type), old_count, new_count)
 #define mem_zero(ptr) __builtin_memset((ptr), 0, sizeof(*(ptr)))
 
 Arena arena_create(size_t size);
@@ -44,7 +57,7 @@ TempArena temp_begin(Arena *arena);
 void temp_end(TempArena temp);
 
 void *alloc(Arena *a, size_t size, size_t align, size_t count);
-void *realloc_array_(Arena *a, void *base, size_t elem_size, size_t align, size_t count);
+void *realloc_array_(Arena *a, void *base, size_t elem_size, size_t align, size_t old_count, size_t new_count);
 
 
 //inline void *memset(void* dest, int ch, size_t count);

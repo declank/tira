@@ -54,4 +54,5 @@ bool string_to_double(String str, double *out);
 bool string_to_int64(String str, int64_t *out);
 
 int string_compare(String lhs, String rhs);
+bool string_equal(String lhs, String rhs);
 

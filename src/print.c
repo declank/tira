@@ -1,5 +1,7 @@
 
+#include <stdarg.h>
 
+#include "platform.h"
 
 
 int vsnprintf(char *buffer, size_t bufsz,  const char *format, va_list vlist);
@@ -21,12 +23,14 @@ int vsnprintf(char *buffer, size_t bufsz,
     char *start = buffer;   
     if (bufsz == 0) buffer = NULL;
     size_t rem = bufsz;
+    bool enforce_sign = false;
     
 
     while (*format) {
         //char c = *format;
         if (*format != '%') {
             if (rem > 1) { *buffer++ = *format++; rem--; }
+            //format++;
             continue;
         }
 
@@ -37,27 +41,45 @@ int vsnprintf(char *buffer, size_t bufsz,
             continue;
         }
 
+        if (*format == '+') {
+            enforce_sign = true;
+            format++;
+        }
+
         if (*format == 's') {
             const char *s = va_arg(vlist, const char *);
-            if (!s) s = "(null)";
-            while (*s) {
+            //if (!s) s = "(null)"; // what LOL?
+            if (!s) return -1;
+            while (*s) { // TODO where be strcpy
                 if (rem > 1) { (*buffer++) = *s++; rem--; }
             }
             format++; continue;
         }
 
+        if (*format == 'S') {
+            String s = va_arg(vlist, String);
+            if (!s.data) return -1;
+            while (s.len--) {
+                if (rem > 1) { (*buffer++) = *s.data++; rem--; }
+            }
+
+        }
+
         // TODO factor out sizing
         if (*format == 'z' && format[1] == 'u') {
             size_t v = va_arg(vlist, size_t);
+
+            if (enforce_sign) { *buffer++ = '+'; rem--; }
             
             char tmp[32];
-            size_t i = 0;
             if (v == 0) { 
                 if (rem > 1) { *buffer++ = '0'; rem--; }
                 format += 2; continue;
             }
 
+            size_t i = 0;
             while (v > 0) { tmp[i++] = '0' + v % 10; v /= 10; }
+
             if (rem > i + 1) {
                 rem -= i;
                 while (i--) { *buffer++ = tmp[i]; }
@@ -74,8 +96,10 @@ int vsnprintf(char *buffer, size_t bufsz,
             size_t i = 0;
 
             if (v == 0) {
+                if (enforce_sign && rem > 2) { *buffer++ = '+'; rem--; }
+
                 if (rem > 1) { *buffer++ = '0'; rem--; }
-                format += 1; continue;
+                format++; continue;
             }
 
             if (v < 0) {
@@ -85,6 +109,7 @@ int vsnprintf(char *buffer, size_t bufsz,
 
             while (v > 0) { tmp[i++] = '0' + v % 10; v /= 10; }
             if (negative) { tmp[i++] = '-'; }
+            else if (enforce_sign) { tmp[i++] = '+'; }
             if (rem > i + 1) {
                 rem -= i;
                 while (i--) { *buffer++ = tmp[i]; }

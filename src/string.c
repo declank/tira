@@ -21,7 +21,7 @@ int strcmp(const char *lhs, const char *rhs) {
 
 StringBuilder sb_create_temp(Arena arena) {
     StringBuilder sb = {0};
-    if ((sb.buffer.data = arena_push(&arena, kilobytes(128))) != NULL) { sb.capacity = kilobytes(128); sb.buffer.len = 0; }
+    if ((sb.buffer.data = arena_push(&arena, megabytes(16))) != NULL) { sb.capacity = megabytes(16); sb.buffer.len = 0; } // TODO fixme
     return sb;
 }
 
@@ -179,3 +179,6 @@ bool string_to_int64(String str, int64_t *out) {
     return true;
 }
 
+bool string_equal(String lhs, String rhs) {
+    return string_compare(lhs, rhs) == 0;
+}

@@ -2,3 +2,10 @@ build/*
 
 test_source*
 todo.txt
+
+perf.data
+perf.data.old
+flame.svg
+callgrind.out
+bench_results*.json
+

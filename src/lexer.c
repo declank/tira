@@ -41,6 +41,29 @@ typedef struct {
     size_t line;
 } Token;
 
+/* typedef struct {
+    uint64_t offset;
+    uint64_t hash;
+    uint32_t len;
+    TokenType type;
+} InternSlot; */
+
+typedef struct {
+    const char *source; // pointer into source buffer
+    uint64_t    hash;
+    uint32_t    len;
+    TokenType   type;
+} InternSlot;
+
+typedef struct {
+    InternSlot *slots;
+    uint64_t    count;
+    uint64_t    cap;
+    Arena      *arena;
+    uint32_t    grow_threshold; // precomputed: cap * load_factor
+    float       load_factor;
+} InternTable;
+
 typedef struct {
     Token *tokens;
     size_t size;
@@ -52,7 +75,122 @@ typedef struct {
 
     size_t line;
     size_t col;
+
+    InternTable table;
 } Lexer;
+
+typedef struct {
+    const char *str;
+    uint32_t len;
+    TokenType type;
+} KeywordEntry;
+
+static const KeywordEntry lexer_keywords[] = {
+    { "func",   4, T_FUNC   },
+    { "true",   4, T_TRUE   },
+    { "false",  5, T_FALSE  },
+    { "if",     2, T_IF     },
+    { "else",   4, T_ELSE   },
+    { "struct", 6, T_STRUCT },
+    { "case",   4, T_CASE   },
+    { "cffi",   4, T_CFFI   },
+    { "return", 6, T_RETURN },
+    { "main",   4, T_MAIN   },
+    { "nil",    3, T_NIL    },
+    { "for",    3, T_FOR    },
+    { "in",     2, T_IN     },
+    { "ref",    3, T_REF    },
+    { "var",    3, T_VAR    },
+    { "const",  5, T_CONST  },
+    { "while",  5, T_WHILE  },
+};
+
+static int lexer_keyword_count = countof(lexer_keywords);
+
+
+
+static uint64_t kw_identifier_hash(const char *str, uint32_t len) { // fnv1a
+    uint64_t h = 14695981039346656037ull;
+    for (uint32_t i = 0; i < len; i++) {
+        h ^= (uint8_t)str[i];
+        h *= 1099511628211ull;
+    }
+    return h;
+}
+
+static void intern_table_grow(InternTable *t) {
+    uint64_t    new_cap   = t->cap * 2;
+    InternSlot *new_slots = new(t->arena, InternSlot, new_cap);
+    uint32_t    new_mask  = new_cap - 1;
+    
+    // Rehash existing entries into new table
+    for (uint64_t i = 0; i < t->cap; i++) {
+        InternSlot *s = &t->slots[i];
+        if (!s->hash) continue;
+        uint64_t slot = (s->hash & new_mask);
+        while (new_slots[slot].hash) {
+            slot = (slot + 1) & new_mask;
+        }
+        new_slots[slot] = *s;
+    }
+
+    t->slots = new_slots;
+    t->cap = new_cap;
+    t->grow_threshold = (uint32_t)(t->cap * t->load_factor);
+}
+
+static InternSlot *intern_insert(InternTable *t, const char *source, uint32_t len, TokenType type) {
+    /* if ((float)t->count / (float)t->cap >= t->load_factor) 
+        intern_table_grow(t); */
+    if (UNLIKELY(t->count >= t->grow_threshold))
+        intern_table_grow(t);
+
+    uint64_t hash = kw_identifier_hash(source, len);
+    uint64_t mask = t->cap - 1;
+    uint64_t slot = hash & mask;
+
+    while (t->slots[slot].hash) {
+        if (t->slots[slot].hash == hash &&
+            t->slots[slot].len  == len  &&
+            memcmp(source, t->slots[slot].source, len) == 0)
+            return &t->slots[slot];
+        slot = (slot + 1) & mask;
+    }
+
+    t->slots[slot] = (InternSlot){
+        .hash = hash,
+        .len = len,
+        //.offset = 0, //offset,
+        .source = source,
+        .type = type,
+    };
+    t->count++;
+
+    return &t->slots[slot];
+}
+
+static uint64_t next_pow2(uint64_t n) {
+    if (n < 2) return 1;
+    return (uint64_t)1 << (64 - __builtin_clzll(n - 1));
+}
+
+static void intern_table_init(Lexer *l, Arena *arena, uint32_t initial_cap) {
+    l->table.arena          = arena;
+    l->table.cap            = next_pow2(initial_cap);
+    l->table.count          = 0;
+    l->table.load_factor    = .75f;
+    l->table.grow_threshold = (uint32_t)(l->table.cap * l->table.load_factor); // make sure to update when cap changes!!
+    l->table.slots          = new(arena, InternSlot, l->table.cap);
+
+    for (int i = 0; i < lexer_keyword_count; i++) {
+        intern_insert(&l->table, lexer_keywords[i].str, lexer_keywords[i].len, lexer_keywords[i].type);
+    }
+}
+
+static TokenType keyword_or_identifier2(InternTable *t, const char *source, uint32_t len) {
+    InternSlot *slot = intern_insert(t, source, len, T_IDENT); // default to identifier unless found
+    return slot->type;
+}
 
 static inline int is_space(int c) {    
     return c == ' '  || c == '\f' || 
@@ -101,16 +239,61 @@ static inline b32 lex_eof(Lexer *lexer) {
 }
 
 static inline char lex_advance(Lexer *lexer) {
-    if (lex_eof(lexer)) { return '\0'; }
+    //if (lex_eof(lexer)) { return '\0'; }
 
     char c = lexer->input.data[lexer->pos++];
-    lexer->col++;
+    //lexer->col++; // TODO removed to reduce instructions in hotpath
 
     return c;
 }
 
 static inline char lex_peek(Lexer *lexer) {
     return lex_eof(lexer) ? '\0' : lexer->input.data[lexer->pos];
+}
+
+/* static inline void lex_scan_identifier(Lexer *L) {
+    const char *cur = L->input.data + L->pos;
+    const char *end = L->input.data + L->input.len;
+    while (cur < end && (is_alnum(*cur) || *cur == '_')) cur++;
+    L->pos = cur - L->input.data;
+} */
+
+static const uint8_t is_ident_char[256] = {
+    ['a'] = 1, ['b'] = 1, ['c'] = 1, ['d'] = 1, ['e'] = 1,
+    ['f'] = 1, ['g'] = 1, ['h'] = 1, ['i'] = 1, ['j'] = 1,
+    ['k'] = 1, ['l'] = 1, ['m'] = 1, ['n'] = 1, ['o'] = 1,
+    ['p'] = 1, ['q'] = 1, ['r'] = 1, ['s'] = 1, ['t'] = 1,
+    ['u'] = 1, ['v'] = 1, ['w'] = 1, ['x'] = 1, ['y'] = 1,
+    ['z'] = 1,
+    ['A'] = 1, ['B'] = 1, ['C'] = 1, ['D'] = 1, ['E'] = 1,
+    ['F'] = 1, ['G'] = 1, ['H'] = 1, ['I'] = 1, ['J'] = 1,
+    ['K'] = 1, ['L'] = 1, ['M'] = 1, ['N'] = 1, ['O'] = 1,
+    ['P'] = 1, ['Q'] = 1, ['R'] = 1, ['S'] = 1, ['T'] = 1,
+    ['U'] = 1, ['V'] = 1, ['W'] = 1, ['X'] = 1, ['Y'] = 1,
+    ['Z'] = 1,
+    ['0'] = 1, ['1'] = 1, ['2'] = 1, ['3'] = 1, ['4'] = 1,
+    ['5'] = 1, ['6'] = 1, ['7'] = 1, ['8'] = 1, ['9'] = 1,
+    ['_'] = 1,
+};
+
+static inline void lex_scan_identifier(Lexer *L) {
+    const char *cur = L->input.data + L->pos;
+    while (is_ident_char[(uint8_t)*cur]) cur++;
+    L->pos = cur - L->input.data;
+}
+
+static inline void lex_scan_digits(Lexer *L) {
+    const char *cur = L->input.data + L->pos;
+    const char *end = L->input.data + L->input.len;
+    while (cur < end && is_digit(*cur)) cur++;
+    L->pos = cur - L->input.data;
+}
+
+static inline void lex_scan_string(Lexer *L) {
+    const char *cur = L->input.data + L->pos;
+    const char *end = L->input.data + L->input.len;
+    while (cur < end && *cur != '"') cur++;
+    L->pos = cur - L->input.data;
 }
 
 static inline b32 is_line_comment_start(Lexer *L) {
@@ -125,7 +308,7 @@ static inline b32 is_block_comment_start(Lexer *L) {
         && L->input.data[L->pos + 1] == '*';
 }
 
-static void skip_line_comment(Lexer *L) {
+/* static void skip_line_comment(Lexer *L) {
     // consume //
     lex_advance(L); lex_advance(L);
 
@@ -157,6 +340,39 @@ static b32 skip_block_comment(Lexer *L) {
 
     return has_newline;
 }
+ */
+
+
+static void skip_line_comment(Lexer *L) {
+    const char *src = L->input.data;
+    L->pos += 2; // skip //
+    while (src[L->pos] != '\n' && src[L->pos] != '\0') L->pos++;
+}
+
+static b32 skip_block_comment(Lexer *L) {
+    const char *src = L->input.data;
+    L->pos += 2; // skip /*
+
+    int depth = 1;
+    b32 has_newline = false;
+
+    while (src[L->pos] != '\0' && depth > 0) {
+        char c = src[L->pos++];
+        if (c == '\n') {
+            has_newline = true;
+        } else if (c == '/' && src[L->pos] == '*') {
+            depth++; L->pos++;
+        } else if (c == '*' && src[L->pos] == '/') {
+            depth--; L->pos++;
+        }
+    }
+
+    if (depth > 0) {
+        // TODO: error — unterminated block comment
+    }
+
+    return has_newline;
+}
 
 #define while_lex(cond) while (!lex_eof(L) && (cond)) { lex_advance(L); }
 
@@ -168,12 +384,109 @@ static inline bool is_hex_digit(char c) {
         (c >= 'A' && c <= 'F');
 }
 
+typedef enum {
+    C_OTHER,      // unknown/invalid
+    C_SPACE,      // space, tab, \r
+    C_NEWLINE,    // \n
+    C_ALPHA,      // a-z, A-Z
+    C_DIGIT,      // 1-9
+    C_ZERO,       // 0 (special — hex prefix)
+    C_UNDERSCORE, // _
+    C_DQUOTE,     // "
+    C_PLUS,       // +
+    C_MINUS,      // -
+    C_STAR,       // *
+    C_SLASH,      // /
+    C_PERCENT,    // %
+    C_EQUALS,     // =
+    C_BANG,       // !
+    C_LT,         // 
+    C_GT,         // >
+    C_AMP,        // &
+    C_PIPE,       // |
+    C_CARET,      // ^
+    C_DOT,        // .
+    C_COLON,      // :
+    C_SEMICOLON,  // ;
+    C_COMMA,      // ,
+    C_LPAREN,     // (
+    C_RPAREN,     // )
+    C_LBRACE,     // {
+    C_RBRACE,     // }
+    C_LSQBRACKET, // [
+    C_RSQBRACKET, // ]
+    C_QUESTION,   // ?
+    C_HASH,       // #
+    C_DOLLAR,     // $
+    C_EOF,        // \0
+} CharClass;
+
+static const uint8_t char_class[256] = {
+    // 0x00-0x08
+    C_EOF, C_OTHER, C_OTHER, C_OTHER, C_OTHER, C_OTHER, C_OTHER, C_OTHER, C_OTHER,
+    // 0x09 \t, 0x0a \n, 0x0b, 0x0c, 0x0d \r
+    C_SPACE, C_NEWLINE, C_OTHER, C_OTHER, C_SPACE,
+    // 0x0e-0x1f
+    C_OTHER, C_OTHER, C_OTHER, C_OTHER, C_OTHER, C_OTHER, C_OTHER, C_OTHER,
+    C_OTHER, C_OTHER, C_OTHER, C_OTHER, C_OTHER, C_OTHER, C_OTHER, C_OTHER,
+    C_OTHER, C_OTHER,
+    // 0x20 space
+    [' ']  = C_SPACE,
+    ['\n'] = C_NEWLINE, // needed for cross platform?
+    ['!']  = C_BANG,
+    ['"']  = C_DQUOTE,
+    ['#']  = C_HASH,
+    ['$']  = C_DOLLAR,
+    ['%']  = C_PERCENT,
+    ['&']  = C_AMP,
+    ['(']  = C_LPAREN,
+    [')']  = C_RPAREN,
+    ['*']  = C_STAR,
+    ['+']  = C_PLUS,
+    [',']  = C_COMMA,
+    ['-']  = C_MINUS,
+    ['.']  = C_DOT,
+    ['/']  = C_SLASH,
+    ['0']  = C_ZERO,
+    ['1']  = C_DIGIT, ['2'] = C_DIGIT, ['3'] = C_DIGIT, ['4'] = C_DIGIT,
+    ['5']  = C_DIGIT, ['6'] = C_DIGIT, ['7'] = C_DIGIT, ['8'] = C_DIGIT,
+    ['9']  = C_DIGIT,
+    [':']  = C_COLON,
+    [';']  = C_SEMICOLON,
+    ['<']  = C_LT,
+    ['=']  = C_EQUALS,
+    ['>']  = C_GT,
+    ['?']  = C_QUESTION,
+    ['A']  = C_ALPHA, ['B'] = C_ALPHA, ['C'] = C_ALPHA, ['D'] = C_ALPHA,
+    ['E']  = C_ALPHA, ['F'] = C_ALPHA, ['G'] = C_ALPHA, ['H'] = C_ALPHA,
+    ['I']  = C_ALPHA, ['J'] = C_ALPHA, ['K'] = C_ALPHA, ['L'] = C_ALPHA,
+    ['M']  = C_ALPHA, ['N'] = C_ALPHA, ['O'] = C_ALPHA, ['P'] = C_ALPHA,
+    ['Q']  = C_ALPHA, ['R'] = C_ALPHA, ['S'] = C_ALPHA, ['T'] = C_ALPHA,
+    ['U']  = C_ALPHA, ['V'] = C_ALPHA, ['W'] = C_ALPHA, ['X'] = C_ALPHA,
+    ['Y']  = C_ALPHA, ['Z'] = C_ALPHA,
+    ['[']  = C_LSQBRACKET,
+    [']']  = C_RSQBRACKET,
+    ['^']  = C_CARET,
+    ['_']  = C_UNDERSCORE,
+    ['a']  = C_ALPHA, ['b'] = C_ALPHA, ['c'] = C_ALPHA, ['d'] = C_ALPHA,
+    ['e']  = C_ALPHA, ['f'] = C_ALPHA, ['g'] = C_ALPHA, ['h'] = C_ALPHA,
+    ['i']  = C_ALPHA, ['j'] = C_ALPHA, ['k'] = C_ALPHA, ['l'] = C_ALPHA,
+    ['m']  = C_ALPHA, ['n'] = C_ALPHA, ['o'] = C_ALPHA, ['p'] = C_ALPHA,
+    ['q']  = C_ALPHA, ['r'] = C_ALPHA, ['s'] = C_ALPHA, ['t'] = C_ALPHA,
+    ['u']  = C_ALPHA, ['v'] = C_ALPHA, ['w'] = C_ALPHA, ['x'] = C_ALPHA,
+    ['y']  = C_ALPHA, ['z'] = C_ALPHA,
+    ['{']  = C_LBRACE,
+    ['|']  = C_PIPE,
+    ['}']  = C_RBRACE,
+};
+
 Token lex_next(Lexer *L) {
     Token tok = {0};
     
     // Skip whitespace and comments
+    const char *src = L->input.data;
     b32 has_newline_in_block_comment = false;
-    for (;;) {
+    /* for (;;) {
         while (!lex_eof(L) && (is_space(lex_peek(L)))) {
             lex_advance(L);
         }
@@ -182,6 +495,17 @@ Token lex_next(Lexer *L) {
         if (is_block_comment_start(L)) { has_newline_in_block_comment = skip_block_comment(L); continue; }
         // TODO should we break instead above to handle the newline token
 
+        break;
+    } */
+    
+    for (;;) {
+        // skip spaces and tabs inline — no function calls
+        while (char_class[(uint8_t)src[L->pos]] == C_SPACE) L->pos++;
+
+        if (src[L->pos] == '/') {
+            if (src[L->pos + 1] == '/') { skip_line_comment(L); continue; }
+            if (src[L->pos + 1] == '*') { has_newline_in_block_comment = skip_block_comment(L); continue; }
+        }
         break;
     }
 
@@ -204,11 +528,6 @@ Token lex_next(Lexer *L) {
     }
 
     switch (c) {
-        // New line
-        case '\n': { 
-            tok.type = T_NEWLINE;
-
-        } break;
 
         // Single character
         case ';': { tok.type = T_SEMICOLON; } break;
@@ -300,7 +619,9 @@ Token lex_next(Lexer *L) {
 
         // Strings
         case '"': {
-            while_lex(lex_peek(L) != '"');
+            //while_lex(lex_peek(L) != '"');
+            //lex_advance(L);
+            lex_scan_string(L);
             lex_advance(L);
             tok.type = T_STRING;
         } break;
@@ -319,13 +640,17 @@ Token lex_next(Lexer *L) {
 
         default: {
             if (is_alpha(c) || c == '_') {
-                while_lex(is_alnum(lex_peek(L)) || lex_peek(L) == '_');
-                tok.type = keyword_or_identifier(L->input.data + tok.start, L->pos - tok.start);
+                //Approach 1: while_lex(is_alnum(lex_peek(L)) || lex_peek(L) == '_');
+                //Approach 2:
+                lex_scan_identifier(L);
+                //Approach 3: const char *cur = L->input.data + L->pos;
+                //while (is_ident_char[]) cur++; 
+                //tok.type = keyword_or_identifier(L->input.data + tok.start, L->pos - tok.start);
+                tok.type = keyword_or_identifier2(&L->table, L->input.data + tok.start, L->pos - tok.start);
             } else if (is_digit(c)) {
                 char next = lex_peek(L);
                 if (c == '0' && (next == 'x' || next == 'X')) {
                     lex_advance(L);
-
                     if (!is_hex_digit(lex_peek(L))) {
                         tok.type = T_INVALID;
                         break;
@@ -335,6 +660,7 @@ Token lex_next(Lexer *L) {
                     tok.type = T_NUM;
                 } else {
                     while_lex(is_digit(lex_peek(L)));
+                    //lex_scan_digits(L);
                     tok.type = T_NUM;
                 }
             } else {
