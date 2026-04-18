@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include "common.h"
+#include "memory.h"
 #include "string.h"
 
 /*
@@ -84,11 +85,16 @@ typedef enum {
     TI_ARR_OF_STRING, // TODO: factor in a way to handle complex types
 } TypeInfo;
 
+typedef struct {
+    bool is_array;
+    bool is_dynamic;
+} TypeInfoStruct;
+
 typedef struct { ParserNode **stmts; Param *params; uint16_t statements_count; uint16_t statements_cap; uint16_t params_count; } Node_Block;
 typedef struct { ParserNode *identifier; ParserNode *block; FuncData *func_data; } Node_FuncDecl;
 typedef struct { ParserNode *callee; ParserNode **args; size_t args_count; } Node_FuncCall;
 typedef struct { ParserNode *expr; } Node_Return;
-typedef struct { ParserNode *identifier; ParserNode *rhs; /* TypeInfo *type_decl; */ } Node_ConstVarDecl;
+typedef struct { ParserNode **identifiers; uint16_t identifier_count; ParserNode *rhs; /* TypeInfo *type_decl; */ } Node_ConstVarDecl;
 typedef struct { ParserNode *lhs; ParserNode *rhs; } Node_Assign;
 typedef struct { ParserNode **elems; size_t count; ParserNode *length_expr; } Node_ArrayLiteral;
 typedef struct { TokenType op; ParserNode *lhs; ParserNode *rhs; } Node_BinaryOp;
@@ -345,6 +351,12 @@ typedef struct {
 static Token *peek(Parser *p) { return &p->tokens[p->pos]; }
 static Token *advance(Parser *p) { return &p->tokens[p->pos++]; }
 
+static Token *peek_ahead(Parser *p, int ahead) {
+    // ahead of 1 means next token, 2 would mean two tokens ahead etc.
+    assert(ahead >= 1 && ahead <= p->token_count);
+    return &p->tokens[p->pos + ahead - 1];    
+}
+
 static int match(Parser *p, TokenType t) {
     if (peek(p)->type == t) {
         advance(p);
@@ -362,9 +374,7 @@ static InternedStr str_intern(Parser *p, Token *tok) {
 }
 
 static void raise_error(Parser *p, const char *msg) {
-
-    error("Parser error at source.tira:%zu: expected %s got ", peek(p)->line,
-          msg); // TODO: allow for column in peek(p)->col
+    tira_error("Parser error at source.tira:%zu: expected %s got ", peek(p)->line, msg); // TODO: allow for column in peek(p)->col
     print((String){.data = &p->source.data[peek(p)->start],
                    .len = peek(p)->length});
     print(S(".\n"));
@@ -372,6 +382,7 @@ static void raise_error(Parser *p, const char *msg) {
     // TODO add to error list
 
     p->error_count++;
+
 }
 
 static Token *previous(Parser *p) {
@@ -433,7 +444,7 @@ static ParserNode *new_expression_node(Parser *p, ParserNodeIndex parent, Parser
         p->node_cap = new_cap;
 
         if (p->nodes == NULL) {
-            error("Unable to allocate more memory in parser\n");
+            tira_error("Unable to allocate more memory in parser\n");
             exit(1);
         }
     }
@@ -451,6 +462,12 @@ static ParserNode *new_node(Parser *p, ParserNodeKind kind, uint32_t tok_index) 
     return new_expression_node(p, 0, kind, tok_index);
 }
 
+static ParserNode *make_multi_ident(ParserNode **multi_placeholder_node, ParserNode *node_to_append) {
+    assert(node_to_append->kind == NODE_IDENTIFIER);
+    // TODO
+    return NULL;
+}
+
 static ParserNode *invalid_node(Parser *p, Token *tok) {
     // Creates a stub invalid node instead of the parse functions returning NULL
     // Avoids checks for NULL everywhere
@@ -459,39 +476,15 @@ static ParserNode *invalid_node(Parser *p, Token *tok) {
     return err_node;
 }
 
+static void node_extra_typeinfo(ParserNode *node, TypeInfoStruct type_info) {
+    // TODO register the extra data
+    printf("EXTRA: %s\n", node_kind_strings[node->kind].data);
+}
+
 static void dump_parser_state(Parser *p) {
     printf("pos=%u, nodes=%u, errors=%u\n",
         p->pos, p->node_count, p->error_count);
     printf("next token: %s\n", token_type_strings[peek(p)->type].data);
-}
-
-// TODO is this needed? used originally for the idea of function calls without parentheses
-static bool is_expr_start(TokenType type) {
-    switch (type) {
-        case T_IDENT:
-        case T_NUM:
-        case T_STRING:
-        case T_TRUE:
-        case T_FALSE:
-        case T_NIL:
-
-        // unary operators TODO review if unary plus added
-        case T_MINUS:
-        case T_NOT:
-
-        // grouping / collections
-        case T_LPAREN:
-        case T_LSQBRACKET:  // array literal
-        case T_LBRACE:      // block/map literal
-
-        // keywords that produce values
-        case T_IF:          // if as expression
-        //case T_CAST:
-            return true;
-
-        default:
-            return false;
-    }
 }
 
 static void skip_newlines(Parser *p) {
@@ -556,16 +549,12 @@ static ParserNode *parse_return(Parser *p);
 ///// Rule table for the Pratt Parser
 
 static ParseRule rules[T_COUNT] = {
-// TODO cleanup order of the table for precedence instead of categories
-// TODO possibly refactor this table into a switch statement 
+// TODO possibly refactor this table into a switch statement, or catch cases where ones doesn't exist
     // ----- Terminals (literals and primaries)
     [T_NUM] = {parse_number, NULL, PREC_NONE},
     [T_STRING] = {parse_string, NULL, PREC_NONE},
     [T_CHARACTER] = {parse_character, NULL, PREC_NONE},
-    //[T_IDENT] = {parse_identifier, NULL, PREC_NONE},
     [T_IDENT] = {parse_identifier, NULL, PREC_NONE},
-    //  [T_TRUE]       = { parse_bool,      NULL,         PREC_NONE },
-    //  [T_FALSE]      = { parse_bool,      NULL,         PREC_NONE },
     [T_NIL] = {parse_nil, NULL, PREC_NONE},
     [T_TRUE] = {parse_bool, NULL, PREC_NONE},
     [T_FALSE] = {parse_bool, NULL, PREC_NONE},
@@ -585,7 +574,6 @@ static ParseRule rules[T_COUNT] = {
     [T_PLUS] = {NULL, parse_binary, PREC_TERM},
     [T_ASTERISK] = {NULL, parse_binary, PREC_FACTOR},
     [T_SLASH] = {NULL, parse_binary, PREC_FACTOR},
-    //  [T_PERCENT]    = { NULL,            parse_binary, PREC_FACTOR },
 
     // ----- Comparison
     [T_LT] = {NULL, parse_binary, PREC_CMP},
@@ -598,9 +586,6 @@ static ParseRule rules[T_COUNT] = {
     // ----- Logic
     [T_LOGICAL_AND] = {NULL, parse_binary, PREC_AND},
     [T_LOGICAL_OR] = {NULL, parse_binary, PREC_OR},
-
-    //  [T_AND]        = { NULL,            parse_binary, PREC_AND },
-    //  [T_OR]         = { NULL,            parse_binary, PREC_OR  },
 
     // ----- Ternary operator ?:
     [T_QUESTION] = {NULL, parse_ternary, PREC_TERNARY},
@@ -617,10 +602,8 @@ static ParseRule rules[T_COUNT] = {
 
     // ----- Keywords
     [T_IF] = {parse_if_expr, NULL, PREC_NONE},
-    //[T_FUNC] = {parse_func_decl, NULL, PREC_NONE},
     [T_FOR] = {parse_for_expr, NULL, PREC_NONE},
     [T_WHILE] = {parse_while_expr, NULL, PREC_NONE},
-    // T_RBRACE and others to catch errors instead of segfault
 };
 
 //- ----- START OF GRAMMAR -----
@@ -649,11 +632,9 @@ void parse_program(Parser *p) {
 
         if (peek(p)->type == T_END)
             break;
-        if (!match(p, T_NEWLINE) && !match(p, T_SEMICOLON))        
-            raise_error(p, "No newline at end of statement\n");
+        if (!match(p, T_NEWLINE) && !match(p, T_SEMICOLON))            
+            raise_error(p, "Missing semicolon or newline at end of statement\n");
     }
-
-    //print(S("}\n"));
 
     if (p->error_count) {
         console_error("Errors found in parsing.\n", 25);
@@ -663,6 +644,7 @@ void parse_program(Parser *p) {
 //- const_decl             = 'const', identifier, [ '=', expr ]
 //- var_decl               = 'var', identifier, [ '=', expr ]
 //-
+// This is unusual but this function does logic for both "var" and "const" keyword rather than duplicating
 static ParserNode *parse_const_var_decl(Parser *p, TokenType type) {
     PRINT_FUNC_NAME;
 
@@ -670,16 +652,61 @@ static ParserNode *parse_const_var_decl(Parser *p, TokenType type) {
     ParserNode *node = new_node(p, (type == T_VAR) ? NODE_VAR_DECL : NODE_CONST_DECL,
                                 previous_token_index(p));
     advance(p);
+
     ParserNode *identifier = parse_identifier(p);
+    ParserNode **identifier_list = new(p->misc_arena, ParserNode*, 1);
+    identifier_list[0] = identifier;
+    uint16_t identifier_count = 0;
 
+    if (identifier != NULL) identifier_count = 1;
+
+    if (identifier_count && match(p, T_COMMA)) {  
+        do {
+            // Add the identifier to the multi-ident
+            if(peek(p)->type == T_IDENT) {
+                identifier_list = realloc_array(p->misc_arena, identifier_list, ParserNode *, identifier_count, identifier_count+1);
+                advance(p);
+                identifier_list[identifier_count++] = parse_identifier(p);
+            }             
+                //make_multi_ident(&identifier_or_multi_ident, parse_identifier(p));
+            else {
+                raise_error(p, "Comma in variable declaration must be followed by another identifier name");
+                // Orphan the node and set type to be NODE_INVALID
+                node->kind = NODE_INVALID;
+                identifier = NULL;
+                identifier_list = NULL;
+                break;
+            }
+        } while(match(p, T_COMMA));
+    }
+
+    TypeInfoStruct type_info = {0};
     // type annotation
+    if (match(p, T_COLON)) {
+        if (match(p, T_LSQBRACKET)) {
+            if (match(p, T_DOTDOT) && match (p, T_RSQBRACKET)) {
+                type_info.is_array = true;
+                type_info.is_dynamic = true;
+                //p->pos += 2;
+            } else {
+                if (expect(p, T_RSQBRACKET, "Array declaration must be [] or [..].") != NULL) {
+                    type_info.is_array = true;
+                }
+            }
+        }
+    }
 
+    if (type_info.is_array) {
+        expect(p, T_IDENT, "Array declaration must have element type specified." );
+    }
     
     ParserNode *rhs = NULL;
     if (match(p, T_EQUALS)) rhs = parse_expr(p);
     
-    node->const_var_decl.identifier = identifier;
+    node->const_var_decl.identifiers = identifier_list;
+    node->const_var_decl.identifier_count = identifier_count;
     node->const_var_decl.rhs = rhs;
+    node_extra_typeinfo(node, type_info); // TODO
 
     return node;
 }
@@ -710,7 +737,6 @@ static ParserNode *parse_func_decl(Parser *p) {
 
         expect(p, T_RPAREN, "Expected ')' after arguments.");
     }
-
 
     FuncData *func_data = new(p->misc_arena, FuncData, 1);
     func_data->params = params;
@@ -882,7 +908,6 @@ static ParserNode *parse_ternary(Parser *p, ParserNode *lhs) {
     PRINT_FUNC_NAME;
 
     // TODO check that this is properly right-associative?
-
     ParserNode *node = new_node(p, NODE_TERNARY, current_token_index(p));
 
     node->ternary.cond = lhs;  
@@ -948,40 +973,10 @@ static ParserNode *parse_unary(Parser *p) {
 //-
 static void parse_postfix(Parser *p) {
     PRINT_FUNC_NAME;
-
     parse_primary(p);
 
     for (;;) {
-        // Function call
-        if (peek(p)->type == T_LPAREN) {
-            advance(p);
-
-            if (peek(p)->type != T_RPAREN) {
-                do {
-                    parse_expr(p);
-                } while (match(p, T_COMMA));
-            }
-
-            expect(p, T_RPAREN, "");
-            continue;
-        }
-
-        // Member access
-        if (peek(p)->type == T_DOT) {
-            assert(0); // @Cleanup not added properly to AST
-
-            advance(p); // consume .
-            expect(p, T_IDENT, "");
-            continue;
-        }
-
-        if (peek(p)->type == T_LBRACE) {
-            assert(0); // @Cleanup not added properly to AST
-
-            parse_struct_init(p);
-            continue;
-        }
-
+        // TODO: Unused, call_op is handled in that function
         break;
     }
 }
@@ -1022,8 +1017,7 @@ static ParserNode *parse_call(Parser *p, ParserNode *lhs) {
 
     if (peek(p)->type != T_RPAREN) {
         do {
-            // TODO: What about pushing elements into a dynamic array in
-            // general?
+            // TODO: What about pushing elements into a dynamic array in general?
             args = realloc_array(p->misc_arena, args, ParserNode *, count, count + 1);
             args[count++] = parse_expr_prec(p, PREC_COMMA);
         } while (match(p, T_COMMA));
@@ -1094,9 +1088,11 @@ static void parse_primary(Parser *p) {
     PRINT_FUNC_NAME;
 
     Token *t = peek(p);
-    //print(S("parse_primary Token type: "));
-    //print(token_type_strings[t->type]);
-    //print_char('\n');
+#ifdef DEBUG
+    print(S("parse_primary Token type: "));
+    print(token_type_strings[t->type]);
+    print_char('\n');
+#endif
 
     switch (t->type) {
         case T_NUM:
@@ -1354,22 +1350,7 @@ static inline ParserNode *parse_const_var_decl_const(Parser *p) {
     return parse_const_var_decl(p, T_CONST);
 }
 
-static const StmtParseFn stmt_dispatch[T_COUNT] = {
-    [T_RETURN] = parse_return,
-    [T_FUNC]   = parse_func_decl,
-    [T_MAIN]   = parse_main_decl,
-    [T_VAR]    = parse_const_var_decl_var,
-    [T_CONST]  = parse_const_var_decl_const,
-};
-
 static ParserNode *parse_stmt(Parser *p) {
-    StmtParseFn fn = stmt_dispatch[peek(p)->type];
-    if (fn) { advance(p); return fn(p); }
-    return parse_expr(p);
-}
-
-
-/* static ParserNode *parse_stmt(Parser *p) {
     PRINT_FUNC_NAME;
 
     //if (match(p, T_FOR))    return parse_for_stmt(p);
@@ -1380,7 +1361,7 @@ static ParserNode *parse_stmt(Parser *p) {
     if (match(p, T_CONST))  return parse_const_var_decl(p, T_CONST);
     
     return parse_expr(p);
-} */
+}
 
 //- return_stmt            = "return" , [expr]
 //-
@@ -1403,6 +1384,8 @@ static ParserNode *parse_block(Parser *p, TokenType block_end) {
 
     // while (peek(p)->type != T_END) {
     while (peek(p)->type != block_end) {
+        Token* token_debug = peek(p);
+
         if (match(p, T_NEWLINE) || match(p, T_SEMICOLON))
             continue;
         ParserNode *stmt = parse_stmt(p);

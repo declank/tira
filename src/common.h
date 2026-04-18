@@ -27,3 +27,4 @@ typedef int64_t TiraVal;
     #define UNLIKELY(x) (x)
 #endif
 
+#define NOT_IMPLEMENTED __attribute__((deprecated("Not yet implemented")))

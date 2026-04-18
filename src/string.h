@@ -37,7 +37,9 @@ typedef struct {
 #define sb_build(builder, x) _Generic((x), String: sb_build_string, \
 				           char:        sb_build_char, \
                            uint64_t:    sb_build_u64, \
-				           int:         sb_build_int)(builder, x)
+                           int64_t:     sb_build_i64, \
+                           int:         sb_build_i64 \
+				           )(builder, x)
 #define sb_char(builder, c) sb_build_char((builder), (c))
 
 size_t strlen(const char* str);
@@ -47,7 +49,7 @@ void sb_newline(StringBuilder *sb);
 void sb_build_string(StringBuilder *sb, String s);
 void sb_build_char(StringBuilder *sb, char c);
 void sb_build_u64(StringBuilder *sb, uint64_t u);
-void sb_build_int(StringBuilder *sb, int i);
+void sb_build_i64(StringBuilder *sb, int64_t i);
 void print_sb(StringBuilder sb);
 
 bool string_to_double(String str, double *out);

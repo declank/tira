@@ -13,9 +13,9 @@
     X(STRUCT) X(NIL) X(TYPE) X(REF) \
     \
     X(EQUALS_RARROW) \
-    X(CT_DIRECTIVE) \
     X(NEWLINE) \
     X(END) \
+    X(DIRECTIVE) \
     X(COUNT)
 
 
@@ -26,7 +26,7 @@ typedef enum {
 } TokenType;
 
 //typedef uint8_t TokenType;
-//_Static_assert(T_COUNT < UINT8_MAX, "Lex token count should fit in uint8_t");
+_Static_assert(T_COUNT < UINT8_MAX, "Lex token count should fit in uint8_t");
 
 #define X(TYPE) S(#TYPE),
 static String token_type_strings[] = {
@@ -40,13 +40,6 @@ typedef struct {
     size_t length;
     size_t line;
 } Token;
-
-/* typedef struct {
-    uint64_t offset;
-    uint64_t hash;
-    uint32_t len;
-    TokenType type;
-} InternSlot; */
 
 typedef struct {
     const char *source; // pointer into source buffer
@@ -104,9 +97,12 @@ static const KeywordEntry lexer_keywords[] = {
     { "const",  5, T_CONST  },
     { "while",  5, T_WHILE  },
 };
-
 static int lexer_keyword_count = countof(lexer_keywords);
 
+static const KeywordEntry directives[] = {
+    { "#import",  7, T_DIRECTIVE },
+};
+static int directives_count = countof(directives);
 
 
 static uint64_t kw_identifier_hash(const char *str, uint32_t len) { // fnv1a
@@ -198,7 +194,8 @@ static inline int is_space(int c) {
 }
 
 static inline int is_digit(int c) {
-    return c >= '0' && c <= '9';
+    //return c >= '0' && c <= '9';
+    return (c - 48) <= 9;
 }
 
 static inline int is_alpha(int c) {
@@ -210,37 +207,12 @@ static inline int is_alnum(int c) {
     return is_alpha(c) || is_digit(c);
 }
 
-static TokenType keyword_or_identifier(char *str, size_t n) {
-    //if (n==6 && !memcmp(str, "import", 6))  return T_IMPORT;
-    if (n==4 && !memcmp(str, "func", 4))    return T_FUNC;
-    if (n==4 && !memcmp(str, "true", 4))    return T_TRUE;
-    if (n==5 && !memcmp(str, "false", 5))   return T_FALSE;
-    if (n==2 && !memcmp(str, "if", 2))      return T_IF;
-    if (n==4 && !memcmp(str, "else", 4))    return T_ELSE;
-    if (n==6 && !memcmp(str, "struct", 6))  return T_STRUCT;
-    if (n==4 && !memcmp(str, "case", 4))    return T_CASE;
-    if (n==4 && !memcmp(str, "cffi", 4))    return T_CFFI;
-    if (n==6 && !memcmp(str, "return", 6))  return T_RETURN;
-    if (n==4 && !memcmp(str, "main", 4))    return T_MAIN;
-    if (n==3 && !memcmp(str, "nil", 3))     return T_NIL;
-    if (n==3 && !memcmp(str, "for", 3))     return T_FOR;
-    if (n==2 && !memcmp(str, "in", 2))      return T_IN;
-    if (n==3 && !memcmp(str, "ref", 3))     return T_REF;
-    if (n==3 && !memcmp(str, "var", 3))     return T_VAR;
-    if (n==5 && !memcmp(str, "const", 5))   return T_CONST;
-    if (n==5 && !memcmp(str, "while", 5))   return T_WHILE;
-    //if (n==4 && !memcmp(str, "type", 4))    return T_TYPE;
-    return T_IDENT;
-}
-
 static inline b32 lex_eof(Lexer *lexer) {
     // TODO: signed vs unsigned sizes
     return lexer->pos >= lexer->input.len;
 }
 
 static inline char lex_advance(Lexer *lexer) {
-    //if (lex_eof(lexer)) { return '\0'; }
-
     char c = lexer->input.data[lexer->pos++];
     //lexer->col++; // TODO removed to reduce instructions in hotpath
 
@@ -250,13 +222,6 @@ static inline char lex_advance(Lexer *lexer) {
 static inline char lex_peek(Lexer *lexer) {
     return lex_eof(lexer) ? '\0' : lexer->input.data[lexer->pos];
 }
-
-/* static inline void lex_scan_identifier(Lexer *L) {
-    const char *cur = L->input.data + L->pos;
-    const char *end = L->input.data + L->input.len;
-    while (cur < end && (is_alnum(*cur) || *cur == '_')) cur++;
-    L->pos = cur - L->input.data;
-} */
 
 static const uint8_t is_ident_char[256] = {
     ['a'] = 1, ['b'] = 1, ['c'] = 1, ['d'] = 1, ['e'] = 1,
@@ -307,41 +272,6 @@ static inline b32 is_block_comment_start(Lexer *L) {
         && (L->pos + 1) < L->input.len
         && L->input.data[L->pos + 1] == '*';
 }
-
-/* static void skip_line_comment(Lexer *L) {
-    // consume //
-    lex_advance(L); lex_advance(L);
-
-    while (!lex_eof(L)) {
-        char c = lex_peek(L);
-        if (c == '\n') break;
-        lex_advance(L);
-    }
-}
-
-static b32 skip_block_comment(Lexer *L) {
-    // consume /*
-    lex_advance(L); lex_advance(L);
-
-    int depth = 1;
-    b32 has_newline = false;
-
-    while (!lex_eof(L) && depth > 0) {
-        char c = lex_advance(L);
-
-        if (c == '\n') { has_newline = true; L->line++; L->col = 1; continue; }
-        if (c == '/' && lex_peek(L) == '*') { depth++; lex_advance(L); continue; }
-        if (c == '*' && lex_peek(L) == '/') { depth--; lex_advance(L); continue; }
-    }
-
-    if (depth > 0) {
-        // TODO: error
-    }
-
-    return has_newline;
-}
- */
-
 
 static void skip_line_comment(Lexer *L) {
     const char *src = L->input.data;
@@ -432,7 +362,7 @@ static const uint8_t char_class[256] = {
     C_OTHER, C_OTHER,
     // 0x20 space
     [' ']  = C_SPACE,
-    ['\n'] = C_NEWLINE, // needed for cross platform?
+    //['\n'] = C_NEWLINE, // needed for cross platform?
     ['!']  = C_BANG,
     ['"']  = C_DQUOTE,
     ['#']  = C_HASH,
@@ -486,17 +416,6 @@ Token lex_next(Lexer *L) {
     // Skip whitespace and comments
     const char *src = L->input.data;
     b32 has_newline_in_block_comment = false;
-    /* for (;;) {
-        while (!lex_eof(L) && (is_space(lex_peek(L)))) {
-            lex_advance(L);
-        }
-
-        if (is_line_comment_start(L))  { skip_line_comment(L); continue; } 
-        if (is_block_comment_start(L)) { has_newline_in_block_comment = skip_block_comment(L); continue; }
-        // TODO should we break instead above to handle the newline token
-
-        break;
-    } */
     
     for (;;) {
         // skip spaces and tabs inline — no function calls
@@ -528,7 +447,6 @@ Token lex_next(Lexer *L) {
     }
 
     switch (c) {
-
         // Single character
         case ';': { tok.type = T_SEMICOLON; } break;
         case ',': { tok.type = T_COMMA; } break;
@@ -609,12 +527,8 @@ Token lex_next(Lexer *L) {
         // Character value
         // TODO cleanup case: #\space or #\tab
         case '#': {
-            // TODO reset the state if error
-            if (lex_peek(L) == '\\') {
-                tok.type = T_CHARACTER;
-                lex_advance(L);
-                lex_advance(L); 
-            }
+            tok.type = T_DIRECTIVE;
+            lex_scan_identifier(L);
         } break;
 
         // Strings
@@ -626,26 +540,14 @@ Token lex_next(Lexer *L) {
             tok.type = T_STRING;
         } break;
 
-        // Compile time directive
-        case '%': {
-            // modulo
-            tok.type = T_PERCENT;
-            // compile-time directive
-            if (L->at_line_start) {
-                while_lex(is_alnum(lex_peek(L)) || lex_peek(L) == '_');
-                if (L->pos > tok.start + 1) tok.type = T_CT_DIRECTIVE;
-            }
-        } break;
-
-
         default: {
             if (is_alpha(c) || c == '_') {
                 //Approach 1: while_lex(is_alnum(lex_peek(L)) || lex_peek(L) == '_');
-                //Approach 2:
+                //Approach 2: lex_scan_identifier(L);
                 lex_scan_identifier(L);
                 //Approach 3: const char *cur = L->input.data + L->pos;
-                //while (is_ident_char[]) cur++; 
-                //tok.type = keyword_or_identifier(L->input.data + tok.start, L->pos - tok.start);
+                //            while (is_ident_char[]) cur++; 
+                //            tok.type = keyword_or_identifier(L->input.data + tok.start, L->pos - tok.start);
                 tok.type = keyword_or_identifier2(&L->table, L->input.data + tok.start, L->pos - tok.start);
             } else if (is_digit(c)) {
                 char next = lex_peek(L);
@@ -660,11 +562,10 @@ Token lex_next(Lexer *L) {
                     tok.type = T_NUM;
                 } else {
                     while_lex(is_digit(lex_peek(L)));
-                    //lex_scan_digits(L);
                     tok.type = T_NUM;
                 }
             } else {
-                tok.type = T_INVALID; // Not necessary due to ZII but put in for code clarity
+                tok.type = T_INVALID;
             }
 
         } break;
@@ -674,3 +575,4 @@ Token lex_next(Lexer *L) {
     tok.length = L->pos - tok.start;
     return tok;
 }
+

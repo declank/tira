@@ -23,8 +23,7 @@ int vsnprintf(char *buffer, size_t bufsz,
     char *start = buffer;   
     if (bufsz == 0) buffer = NULL;
     size_t rem = bufsz;
-    bool enforce_sign = false;
-    
+    bool enforce_sign = false; 
 
     while (*format) {
         //char c = *format;
@@ -143,7 +142,7 @@ int vsnprintf(char *buffer, size_t bufsz,
     return written;
 }
 
-int error(const char *fmt, ...) {
+int tira_error(const char *fmt, ...) {
     char buf[1024];
 
     va_list ap;
@@ -172,3 +171,4 @@ int printf(const char* restrict format, ...) {
 
     return len;
 }
+

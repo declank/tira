@@ -31,4 +31,5 @@ void print_cstr(const char *str);
 int getchar(void);
 void exit(int status);
 
-int error(const char *fmt, ...);
+int tira_error(const char *fmt, ...);
+

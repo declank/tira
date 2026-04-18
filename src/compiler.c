@@ -111,7 +111,7 @@ void compiler_lex_file(Compiler *c, const FileBuf *input_file) {
     lexer->at_line_start = true;
 
     if (!lexer->tokens) {
-        error("Not enough memory\n");
+        tira_error("Not enough memory\n");
         exit(1);
     }
 
@@ -120,18 +120,10 @@ void compiler_lex_file(Compiler *c, const FileBuf *input_file) {
     intern_table_init(lexer, c->arena, initial_table_cap);
 
     if (lexer->table.slots == NULL) {
-        error("Lexer intern table slots not initialised\n");
+        tira_error("Lexer intern table slots not initialised\n");
         exit(1);
     } 
     
-    // Parse out the #!
-    /* if (lexer->pos == 0 && 
-            lexer->input.len > 2 &&
-            lexer->input.data[0] == '#' &&
-            lexer->input.data[1] == '!') {
-        
-        while (lex_peek(lexer) != '\n') lex_advance(lexer);
-    } */
     if (lexer->pos == 0 && input_file->len > 2 &&
             input_file->data[0] == '#' && input_file->data[1] == '!') {
         while (lexer->input.data[lexer->pos] != '\n') lexer->pos++;
@@ -140,15 +132,8 @@ void compiler_lex_file(Compiler *c, const FileBuf *input_file) {
     // TODO consume newline also above
 
     while ((token = lex_next(&c->lexer)).type != T_END) {
-        // print(token_type_strings[token.type]); print(S("\n"));
-        //if (lexer->size >= lexer->cap) {
-        if (__builtin_expect(lexer->size >= lexer->cap, 0)) { // TODO test UNLIKELY macro
+        if (UNLIKELY(lexer->size >= lexer->cap)) {
             size_t new_cap = lexer->cap * 2;
-            //Token *new_tokens = new(c->arena, Token, lexer->cap);
-            //if (lexer->tokens) { // nocheckin want to replace memcpy here with realloc_array so the array doesn't move
-                //memcpy(new_tokens, lexer->tokens, lexer->size * sizeof(Token));
-            //}
-
             Token *new_tokens = realloc_array(c->arena, lexer->tokens, Token, lexer->cap, new_cap);
             lexer->cap = new_cap;
             lexer->tokens = new_tokens;
@@ -216,7 +201,7 @@ void debug_print_lexer(Compiler *c) {
         sb_newline(&sb);
     }
     sb_build(&sb, S("==========\n"));
-#if 0
+#if 1   // switch used here as source_line() is incredibly slow but fine for debugging
     for (size_t i = 0; i < lexer->size; i++) {
         Token cur = lexer->tokens[i];
 
@@ -232,7 +217,6 @@ void debug_print_lexer(Compiler *c) {
     }
 #endif
 
-
     sb_newline(&sb);
 
     sb_build(&sb, S("Lines lexed: ")); sb_build(&sb, lexer->line); sb_newline(&sb);
@@ -241,7 +225,6 @@ void debug_print_lexer(Compiler *c) {
     print_sb(sb);
 
 }
-//#endif
 
 void compiler_parse(Compiler *c) {
     assert(c->stage == STAGE_LEXED);
@@ -257,19 +240,19 @@ void compiler_parse(Compiler *c) {
     parser->node_cap = 256;
     parser->nodes = new(c->nodes_arena, ParserNode, parser->node_cap);
     parser->nodes_arena = c->nodes_arena;
-/*     parser->statement_cap = 256;
-    parser->statements = new(c->arena, uint32_t, parser->statement_cap); */
     parser->misc_arena = c->arena;
     
     parser->stmts_arena = c->stmts_arena;
 
     // Fixup, touch all the nodes for paging
-    /* for (size_t i = 0; i < parser->node_cap; i++) {
+    // TODO: investigate RIORegisterBuffer for win32 for touching pages:
+    // https://serverframework.com/asynchronousevents/2011/10/windows-8-registered-io-buffer-strategies.html
+    for (size_t i = 0; i < parser->node_cap; i++) {
         parser->nodes[i] = (ParserNode){0};
-    } */
+    }
 
     if (!parser->nodes) {
-        error("Not enough memory\n");
+        tira_error("Not enough memory\n");
         exit(1);
     }
 
@@ -325,9 +308,6 @@ void debug_print_node_extrainfo(Parser p, StringBuilder sb, ParserNode n) {
             } break;
         default: { /* unhandled extra info printing */ } break;
     }
-
-    
-
 }
 
 void debug_print_node_typeinfo(Parser p, StringBuilder sb, ParserNode n) {
@@ -373,21 +353,7 @@ void debug_print_parser(Compiler *c) {
         debug_print_node_extrainfo(p, g_sb, n);
         debug_print_node_typeinfo(p, g_sb, n);
         sb_build(&g_sb, S("\n"));
-
-        //sb_newline(&sb);
     }
-    
-/*     sb_build(&g_sb, S("==========\n"));
-    sb_build(&g_sb, S("STATEMENTS:\n"));
-
-    for (uint32_t i; i < p.statement_count; i++) {
-        uint32_t node_index = p.statements[i];
-        ParserNode n = p.nodes[node_index];
-        sb_build(&g_sb, (int)node_index);
-        sb_build(&g_sb, S(": "));
-        debug_print_node_info(p, g_sb, n);
-    } */
-
     print_sb(g_sb);
 }
 
@@ -407,16 +373,14 @@ void compiler_codegen(Compiler *c, const char* filepath) {
 
     codegen_compile_program(g, &c->parser);
 
+    int bytes_written = 0;
     int fd = open_file("build/out.asm");
     if (fd) {
-        write_to_file(fd, g->data_buf, g->data_used);
-        write_to_file(fd, g->text_buf, g->text_used);
+        bytes_written += write_to_file(fd, g->data_buf, g->data_used);
+        bytes_written += write_to_file(fd, g->text_buf, g->text_used);
         close_file(fd);
     }
 }
-
-
-
 
 void compiler_semantic_ir(Compiler *c) {
     assert(c->stage == STAGE_PARSED);
@@ -431,9 +395,5 @@ void compiler_semantic_ir(Compiler *c) {
     semantic1(&c->sema);
 }
 
-void vm_run(void); // Forward declaration for vm.c
 
-void compiler_print_pass_timers(Compiler c) {
-
-}
 

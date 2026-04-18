@@ -45,7 +45,7 @@ void *alloc(Arena *a, size_t size, size_t align, size_t count) {
     size_t new_used = (aligned - (uintptr_t)a->base) + total;
 
     if (new_used > a->size) { // Arena out of memory
-        error("Arena out of memory\n");
+        tira_error("Arena out of memory\n");
         //__asm__ volatile("int3");
         exit(1);
         return NULL;
@@ -58,25 +58,6 @@ static inline size_t next_capacity(size_t count) {
     //return count < 8 ? 8 : count * 2;
     return count ? count * 2 : 1;
 }
-
-#if 0
-void *realloc_array_(Arena *a, void *base, size_t elem_size, size_t align, size_t count) {
-    uint8_t *arena_top = a->base + a->used;
-    uint8_t *array_end = (uint8_t *)base + elem_size * count;
-    b8 at_top = base && array_end == arena_top;
-
-    if (at_top) {
-        size_t current = (array_end - (uint8_t*)base) / elem_size;
-        if (count > current) alloc(a, elem_size, align, next_capacity(current) - current);
-        return base;
-    }
-
-    size_t capacity = next_capacity(count);
-    void *new_ptr = alloc(a, elem_size, align, capacity);
-    if (base != NULL) memcpy(new_ptr, base, elem_size * count);
-    return new_ptr;
-}
-#endif
 
 static inline uintptr_t align_up_pow2(uintptr_t val, uintptr_t align) {
     return (val + align - 1) & ~(align - 1);
@@ -110,12 +91,12 @@ void *realloc_array_(Arena *a, void *base, size_t elem_size, size_t align, size_
     if (base != NULL) {
         memcpy(new_ptr, base, elem_size * old_count);
 
-        // Release pages from old allocation
+/*         // Release pages from old allocation
         page_start = align_up_pow2((uintptr_t) base, 4096);
         page_end   = align_down_pow2((uintptr_t) array_end, 4096);
 
         if (page_start < page_end)
-            mem_dont_need((void *)page_start, page_end - page_start);
+            mem_dont_need((void *)page_start, page_end - page_start); */
     }
 
     return new_ptr;

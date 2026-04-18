@@ -1,5 +1,8 @@
 
 
+// TODO: todos should be moved into previous line or share a line with assembly source
+// as they are not shown when stepped through on gdb (you can see them with the frame output in lldb)
+
 #include "string.h"
 typedef struct {
     char    *data;
@@ -38,6 +41,12 @@ typedef struct {
     uint32_t label_count;
 
     uint32_t function_count;
+
+    // Indicators used for assembly comments, need to fix column
+    // These will be used to insert comments near asm instructions
+    // that contain the line text from the original source file
+    uint32_t line_no_indicator;
+    uint32_t col_no_indicator;
 
     const char* filename;
 } CodeGen;
@@ -79,28 +88,37 @@ static void emit_char(CodeGen *g, char c) {
     g->text_buf[g->text_used++] = c;
 }
 
-/* static void emit_data_char(CodeGen *g, char c) {
-    if (UNLIKELY(g->data_used >= g->data_cap)) {
-        size_t new_cap = g->data_cap * 2;
-        g->data_buf = realloc_array(g->arena, g->data_buf, char, g->data_cap, new_cap);
-        g->data_cap = new_cap;
-    }
-    g->data_buf[g->data_used++] = c;
-} */
-
 static void codegen_emit_externals(CodeGen *g) {
     emit(g, "\n.intel_syntax noprefix\n");
-    emit(g, "\n.file 1 \"%s\"\n\n", g->filename);
-    emit(g, ".section .text\n");
+    emit(g, ".global main\n");
 }
 
 static void emit_data(CodeGen *g, const char *fmt, ...) {
-    // printf into g->data_buf, grow if needed
+    // TODO
 }
 
 static uint32_t emit_label(CodeGen *g) {
     emit(g, ".LBB%d_%d:\n", g->function_count, g->label_count);
     return g->label_count++;
+}
+
+String source_line(String source, size_t lineno); // forward decl. compiler.c
+
+void emit_source_line(CodeGen *g, ParserNode *node) {
+    Token tok = g->parser->tokens[node->tok_index];
+    emit(g, "\t\t##### %S", source_line(g->parser->source, g->line_no_indicator));
+}
+
+void emit_previous_source_line(CodeGen *g, ParserNode *node) {
+    Token tok = g->parser->tokens[node->tok_index];
+    if(g->line_no_indicator > 0)
+        emit(g, "\t\t##### %S", source_line(g->parser->source, g->line_no_indicator-1));
+}
+
+void emit_next_source_line(CodeGen *g, ParserNode *node) {
+    Token tok = g->parser->tokens[node->tok_index];
+    if(g->line_no_indicator > 0)
+        emit(g, "\t\t##### %S", source_line(g->parser->source, g->line_no_indicator+1));
 }
 
 static void codegen_block(CodeGen *g, Node_Block *block) {
@@ -115,43 +133,42 @@ static void codegen_func_call(CodeGen *g, ParserNode *node) {
     // evaluate args left to right into registers
     // System V AMD64: rdi, rsi, rdx, rcx, r8, r9
     static const char *arg_regs[] = { "rdi", "rsi", "rdx", "rcx", "r8", "r9" };
-    (void)arg_regs; // used below per-arg
 
     // for now handle single string arg case (puts/print)
     if (call->args_count == 1) {
         codegen_node(g, call->args[0]); // result lands in rdi/rsi for strings
     }
 
+    // TODO: placeholder code for mapping names to runtime functions, may later use a hash table or other naming scheme
     // emit call — map known tira names to runtime names
     if (string_equal(callee->identifier.str, S("puts")))
-        emit(g, "    call puts_tira\n");
+        emit(g, "    call puts_tira");
     else if (string_equal(callee->identifier.str, S("print")))
-        emit(g, "    call print_tira\n");
+        emit(g, "    call print_tira");
     else if (string_equal(callee->identifier.str, S("gets")))
-        emit(g, "    call gets_tira\n");
+        emit(g, "    call gets_tira");
     else if (string_equal(callee->identifier.str, S("eval")))
-        emit(g, "    call eval_tira\n");
-    else if(callee->kind == NODE_DOT_ACCESS) {
+        emit(g, "    call eval_tira");
+    /* else if(callee->kind == NODE_DOT_ACCESS) { // TODO methods removed, requires cleanup
         if (callee->dot_access.lhs->kind == NODE_IDENTIFIER) {
             Token *member_tok = (Token*)(g->parser->tokens + callee->dot_access.member_tok_index);
             String member = (String) { .data = &g->parser->source.data[member_tok->start],
                                        .len  = member_tok->length };
-            emit(g, "    call %S    #%S.%S\n", member, callee->dot_access.lhs->identifier.str, member);
+            emit(g, "    call %S    #%S.%S", member, callee->dot_access.lhs->identifier.str, member);
         } else {
             assert(0);
         }
-    }
+    } */
     else
-        emit(g, "    call %S\n", callee->identifier.str);
+        emit(g, "    call %S", callee->identifier.str);
+
+    emit_source_line(g, node);
+    emit(g, "\n");
 }
 
 static void codegen_func_decl(CodeGen *g, ParserNode *node) {
     Node_FuncDecl *decl = &node->func_decl;
     ParserNode    *ident = decl->identifier;
-
-#ifdef OMIT_EXTRA_FUNC_CODEGEN
-    if (!string_equal(ident->identifier.str, S("main"))) return;
-#endif
 
     // reset locals for this function
     g->local_count = 0;
@@ -162,19 +179,11 @@ static void codegen_func_decl(CodeGen *g, ParserNode *node) {
     const char *name = ident->identifier.str.data;
     size_t      nlen = ident->identifier.str.len;
     String      func_name = (String) {(char*)name, nlen};
-    emit(g, "\n.global %S\n", func_name);
-    emit(g, "%S:\n", func_name);
-
-
-    //emit(g, "\nglobal %.*s\n", (int)nlen, name);
-    //emit(g, "%.*s:\n", (int)nlen, name);
-    //emit(g, "\n.global main\n");
-    //emit(g, "main:\n");
-    
+    emit(g, "\n%S:\n", func_name);
 
     // prologue — reserve space for locals (placeholder, patch after block)
     emit(g, "    push rbp\n");
-    emit(g, "    mov  rbp, rsp\n");
+    emit(g, "    mov  rbp, rsp\n\n");
     // TODO patch stack reservation after knowing local count:
     // emit(g, "    sub  rsp, %d\n", aligned_stack_size);
 
@@ -183,7 +192,9 @@ static void codegen_func_decl(CodeGen *g, ParserNode *node) {
     // epilogue
     emit(g, "    xor  eax, eax\n");
     emit(g, "    pop  rbp\n");
-    emit(g, "    ret\n\n");
+    emit(g, "    ret"); emit_next_source_line(g, node);
+
+    emit(g, "\n\n");
 
     g->function_count++;
 }
@@ -205,9 +216,8 @@ static void codegen_string_literal(CodeGen *g, ParserNode *node) {
     size_t   len  = node->string.len  - 2;
     uint32_t id   = codegen_intern_string(g, data, len);
     // result: rdi = ptr, rsi = len
-    //emit(g, "    mov  rdi, .L.str\n"); NO use lea
     emit(g, "    lea  rdi, [.LC%d]\n", id);
-    emit(g, "    mov  rsi, %d\n", len); // TODO
+    emit(g, "    mov  rsi, %d\n", len);
 }
 
 static int32_t codegen_alloc_local(CodeGen *g, InternedStr name) {
@@ -228,20 +238,23 @@ static int32_t codegen_lookup_local(CodeGen *g, InternedStr name) {
 
 static void codegen_var_decl(CodeGen *g, ParserNode *node) {
     Node_ConstVarDecl *decl = &node->const_var_decl;
-    int32_t offset = codegen_alloc_local(g, decl->identifier->identifier);
+    int32_t offset = codegen_alloc_local(g, decl->identifiers[0]->identifier);
 
     if (decl->rhs) {
         codegen_node(g, decl->rhs); // result in rax
-        emit(g, "    mov qword ptr [rbp%+d], rax\n", offset);
+        emit(g, "    mov  qword ptr [rbp%+d], rax", offset);
     } else {
-        emit(g, "    mov qword ptr [rbp%+d], 0\n", offset);
+        emit(g, "    mov  qword ptr [rbp%+d], 0", offset);
     }
+
+    emit_source_line(g, node);
+    emit(g, "\n");
 }
 
 static void codegen_identifier(CodeGen *g, ParserNode *node) {
     int32_t offset = codegen_lookup_local(g, node->identifier);
     if (offset != 0)
-        emit(g, "    mov rax, qword ptr [rbp%+d]\n", offset);
+        emit(g, "    mov  rax, qword ptr [rbp%+d]\n", offset);
     // else: global or function name — handled by caller
 }
 
@@ -251,10 +264,12 @@ static void codegen_while(CodeGen *g, ParserNode *node) {
 
     int loop_label = emit_label(g);
     codegen_node(g, cond);
-    emit(g, "    test al, 1\n");
+    emit(g, "    test al, 1");
+
+    emit_source_line(g, node);
 
     int exit_label = g->label_count; // reserve label index before emitting
-    emit(g, "    je .LBB%d_%d\n", g->function_count, exit_label);
+    emit(g, "\n    je .LBB%d_%d\n", g->function_count, exit_label);
     g->label_count++;
 
     codegen_block(g, &block->block);
@@ -269,62 +284,56 @@ static void codegen_if(CodeGen *g, ParserNode *node) {
 
     codegen_node(g, cond);
     int else_label = g->label_count++;
-    emit(g, "    test al, 1\n");
-    emit(g, "    je .LBB%d_%d\n", g->function_count, else_label);
+    emit(g,   "    test al, 1"); emit_source_line(g, node);
+    emit(g, "\n    je .LBB%d_%d\n", g->function_count, else_label);
     codegen_node(g, then_branch);
     int exit_label = g->label_count++;
-    emit(g, "    jmp .LBB%d_%d\n", g->function_count, exit_label);
-    emit(g, ".LBB%d_%d:\n", g->function_count, else_label);
+    emit(g,   "    jmp .LBB%d_%d", g->function_count, exit_label); emit_next_source_line(g, node);
+    emit(g, "\n.LBB%d_%d:\n", g->function_count, else_label);
+
     codegen_node(g, else_branch);
-    emit(g, ".LBB%d_%d:\n", g->function_count, exit_label);
+    emit(g,   ".LBB%d_%d:\n", g->function_count, exit_label);
 }
 
-#define EMIT_LOC emit_loc(g, line_no, col_no)
-#define EMIT_LOC 
-
-String source_line(String source, size_t lineno); // forward decl from compiler.c
-static void emit_loc(CodeGen *g, size_t line_no, size_t col_no) {
-    // Emit the line in the form
-    // # line...
-    //emit(g, "\n# %S", source_line(g->parser->source, line_no)); // sadly super slow
-    emit(g, "\n.loc 1 %d %d\n", line_no, col_no);
-}
+#define PRE_EMIT
+#define POST_EMIT
+//#define EMIT_LOC emit_loc(g, line_no, col_no)
+//#define EMIT_LOC 
 
 static void codegen_node(CodeGen *g, ParserNode *node) {
     if (!node) return;
 
     Token *tok = (g->parser->tokens + node->tok_index);
-    size_t line_no = tok->line;
-    size_t col_no = 0; // TODO tok->column;
+    g->line_no_indicator = tok->line;
+    g->col_no_indicator = 0; // TODO tok->column;
 
     switch (node->kind) {
-        case NODE_FUNC_DECL:    codegen_func_decl(g, node);      break;
-        case NODE_FUNC_CALL:    EMIT_LOC; codegen_func_call(g, node);      break;
-        case NODE_BLOCK:        codegen_block(g, &node->block);  break;
-        case NODE_STRING:       codegen_string_literal(g, node); break;
-        case NODE_VAR_DECL:     EMIT_LOC; codegen_var_decl(g, node);   break;
-        case NODE_IDENTIFIER:   codegen_identifier(g, node); break;
-        case NODE_WHILE_EXPR:   EMIT_LOC; codegen_while(g, node);      break;
-        case NODE_IF_EXPR:      EMIT_LOC; codegen_if(g, node);         break;
+        case NODE_FUNC_DECL:    codegen_func_decl(g, node);             break;
+        case NODE_FUNC_CALL:    PRE_EMIT; codegen_func_call(g, node);   POST_EMIT; break;
+        case NODE_BLOCK:        codegen_block(g, &node->block);         break;
+        case NODE_STRING:       codegen_string_literal(g, node);        break;
+        case NODE_VAR_DECL:     PRE_EMIT; codegen_var_decl(g, node);    POST_EMIT; break;
+        case NODE_IDENTIFIER:   codegen_identifier(g, node);            break;
+        case NODE_WHILE_EXPR:   PRE_EMIT; codegen_while(g, node);       POST_EMIT; break;
+        case NODE_IF_EXPR:      PRE_EMIT; codegen_if(g, node);          POST_EMIT; break;
         case NODE_BOOL: {
-            //EMIT_LOC;
-/*             if (node->bool_value) { emit(g, "    mov  eax, 1\n"); }
-            else                  { emit(g, "    xor  eax, eax\n"); } */
-
             static const char *bool_asm[] = {
-                "    xor  eax, eax\n",
-                "    mov  eax, 1\n",
+                "    xor  eax, eax\n",  // false 0
+                "    mov  eax, 1\n",    // true 1
             };
             emit(g, bool_asm[node->bool_value & 1]);
         } break;
+
         case NODE_RETURN: {
-            //EMIT_LOC;
-            if (node->ret.expr) codegen_node(g, node->ret.expr);
+            if (node->ret.expr)
+                codegen_node(g, node->ret.expr);
             emit(g, "    pop  rbp\n");
             emit(g, "    ret\n");
         } break;
+
         default:
-            emit(g, "    # TODO: node kind %d: %S\n", node->kind, node_kind_strings[node->kind]);
+            emit(g, "    # TODO: node kind %d: %S --", node->kind, node_kind_strings[node->kind]);
+            emit_source_line(g, node); emit(g, "\n");
             break;
     }
 }
@@ -335,19 +344,16 @@ static void codegen_emit_data_section(CodeGen *g) {
         StringEntry *s = &g->strings[i];
         emit(g, ".LC%d:\n", i);
         emit(g, "    .asciz \"");
+
         // emit the string bytes, escaping special chars
         for (size_t j = 0; j < s->len; j++) {
             char c = s->data[j];
-            if (0);
-            //if (c == '\n')      emit(g, "\", 10, \"");
-            //else if (c == '\t') emit(g, "\", 9, \"");
-            else                emit_char(g, c);
+            emit_char(g, c);
         }
-        emit(g, "\"\n\n");
-        //emit(g, "\", 0\n");
-        //emit(g, "\", 0\n");
-        //emit(g, "    str_%u_len equ %zu\n", s->id, s->len);
+        
+        emit(g, "\"\n"); 
     }
+    emit(g, "\n\n");
 }
 
 void codegen_compile_program(CodeGen *g, Parser *p) {

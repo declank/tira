@@ -3,7 +3,7 @@
 #include "memory.h"
 
 void raise_semantic_error(const char* err_msg) {
-    error(err_msg);
+    tira_error(err_msg);
     printf("\n");
 }
 

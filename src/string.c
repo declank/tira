@@ -49,7 +49,7 @@ void sb_build_char(StringBuilder *sb, char c) {
     sb->buffer.data[sb->buffer.len++] = c;
 }
 
-void sb_build_int(StringBuilder *sb, int i) {
+void sb_build_i64(StringBuilder *sb, int64_t i) {
     size_t remaining = sb_remaining(sb);
 
     if (i == 0 && remaining > 0) {

@@ -1,0 +1,28 @@
+
+// eval, gets, print and puts are implemented in C for now
+
+main {
+    var history: [..]String;
+
+    c_testing();
+
+    puts("tira repl");
+    puts("ctrl+c to exit");
+
+    var running = true;
+    while running {
+        print("> ");
+        var input, ok = read_line();
+
+        if !ok || input == "exit" {
+            running = false;
+        } else if input == "history" {
+            for history { print(it) }
+        } else {
+            arr_append(history, input);
+            // puts(eval(input)); // broken currently
+        }
+    }
+}
+
+

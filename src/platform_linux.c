@@ -42,6 +42,9 @@
 
 #define MADV_DONTNEED   4
 
+
+//FIXASSERT!!!
+
 static inline long syscall1(long n, long a1) {
     long ret;
 
@@ -273,9 +276,13 @@ void __assert_fail(const char *assertion,
     console_error(assertion, strlen(assertion));
 
     // File
-    const char file_prefix[] = ", file ";
+    const char file_prefix[] = ", in ";
     console_error(file_prefix, lengthof(file_prefix));
     console_error(file, strlen(file));
+
+    tira_error(":");
+    // Line
+    tira_error("%d", line);
 
     // Function
     const char func_prefix[] = ", function ";
@@ -314,6 +321,7 @@ int main(int argc, const char *argv[]);
 
 #define STACK_TRACE_HANDLER
 
+#ifndef TIRA_USE_LIBC
 __attribute__((naked)) void _start(void) {
     __asm__ volatile (
         ".intel_syntax noprefix\n"
@@ -334,6 +342,7 @@ __attribute__((naked)) void _start(void) {
         "call exit\n"
     );
 }
+#endif
 
 
 
@@ -343,7 +352,7 @@ __attribute__((naked)) void _start(void) {
 
 #define MAX_BACKTRACE_LINES 64
 
-int error(const char *fmt, ...); // Forward declaration needed referring to print.c
+int tira_error(const char *fmt, ...); // Forward declaration needed referring to print.c
 
 int backtrace(void **buffer, int size) {
     return 0; // TODO
@@ -360,14 +369,14 @@ void print_stacktrace(void) {
 	int nptrs = backtrace(buffer, MAX_BACKTRACE_LINES);
 	symbols = backtrace_symbols(buffer, nptrs);
 	if(symbols == NULL)	{
-		error("print_stacktrace to be implemented\n");
+		tira_error("print_stacktrace to be implemented\n");
 		exit(1); // TODO
 	}
 
     // start at 2 to exclude this function and handler()
 	for(uint32_t i = 2; i < (uint32_t) (nptrs-2); ++i) {
 		//if addr2line failed, print what we can
-		error("[%i] %s\n", nptrs-2-i-1, symbols[i]);
+		tira_error("[%i] %s\n", nptrs-2-i-1, symbols[i]);
 	}
 
     // TODO free symbols
@@ -417,25 +426,25 @@ void handler(int signal) {
 
     switch (signal) {
         case SIGTERM: 
-            error("SIGTERM: termination request, sent to the program\n");
+            tira_error("SIGTERM: termination request, sent to the program\n");
             break;
         case SIGSEGV:
-            error("SIGSEGV: invalid memory access (segmentation fault)\n");
+            tira_error("SIGSEGV: invalid memory access (segmentation fault)\n");
             break;
         case SIGINT:
-            error("SIGINT: external interrupt, usually initiated by the user\n");
+            tira_error("SIGINT: external interrupt, usually initiated by the user\n");
             break;
         case SIGILL:
-            error("SIGILL: invalid program image, such as invalid instruction\n");
+            tira_error("SIGILL: invalid program image, such as invalid instruction\n");
             break;
         case SIGABRT:
-            error("SIGABRT: abnormal termination condition, as is e.g. initiated by abort()\n");
+            tira_error("SIGABRT: abnormal termination condition, as is e.g. initiated by abort()\n");
             break;
         case SIGFPE:
-            error("SIGFPE: erroneous arithmetic operation such as divide by zero\n");
+            tira_error("SIGFPE: erroneous arithmetic operation such as divide by zero\n");
             break;
         default:
-            error("Another signal triggered, value: %d\n", signal);
+            tira_error("Another signal triggered, value: %d\n", signal);
             break;
     }
 

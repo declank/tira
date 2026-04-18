@@ -1,4 +1,8 @@
 
+#include "string.h"
+static int _hits[65536];
+
+#define HIT() (_hits[__LINE__]++)
 
 #include <assert.h>
 #include <limits.h>
@@ -58,14 +62,27 @@ void tests(void) {
     exit(0);
 }
 
+typedef enum {
+    MM_INVALID,
+    MM_FUNCTION,
+    MM_GLOBAL_VAR,
+} ModuleMappingType;
+
+typedef struct {
+    ModuleMappingType type;
+    const char *name;
+    void *ptr;
+} ModuleMapping;
+
+typedef struct {
+    uint64_t dummy;
+} TiraContext;
+
+typedef String TiraString;
+
 int main(int argc, const char *argv[]) {
-    (void) argc;
-    (void) argv;
-
-    //tests();
-
     if (argc != 2) {
-        error("Input file not specified. Exiting.\n");
+        tira_error("Input file not specified. Exiting.\n");
         return 1;
     }
 
@@ -74,12 +91,12 @@ int main(int argc, const char *argv[]) {
     Arena temp_arena = arena_create(megabytes(16));
     Arena nodes_arena = arena_create(megabytes(16));
     Arena stmts_arena = arena_create(megabytes(16));
-    
+
     Compiler c = compiler_init(&arena, &code_arena, &temp_arena, &nodes_arena, &stmts_arena);
     FileBuf input_file;
 
     if (!read_entire_file(&input_file, argv[1], &arena)) {
-        error("Unable to read input file\n");
+        tira_error("Unable to read input file\n");
         exit(1);
     }
 
@@ -88,6 +105,7 @@ int main(int argc, const char *argv[]) {
     #ifdef DEBUG
     debug_print_lexer(&c);
     #endif
+
     compiler_parse(&c);
     #ifdef DEBUG
     debug_print_parser(&c);
@@ -95,6 +113,14 @@ int main(int argc, const char *argv[]) {
     compiler_codegen(&c, argv[1]);
 
     print_arena_usage(arena, nodes_arena, stmts_arena);
+
+    printf("HIT REPORT:\n");
+    for (int i = 0; i < 65536; i++) {
+        if (_hits[i]) {
+            printf("Line %u: %d hits\n");
+        }
+    }
+
     return 0;
 }
 
