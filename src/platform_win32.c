@@ -58,11 +58,11 @@ void __cdecl _wassert(const wchar_t* expr, const wchar_t* file, uint32_t line) {
 #define MAX_ARGS 64
 #define MAX_ARG_LEN 260
 
-void *mem_alloc(size_t size) {
+void *mem_alloc(usize size) {
     return VirtualAlloc(NULL, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
 }
 
-void *mem_alloc_code(size_t size) {
+void *mem_alloc_code(usize size) {
     return VirtualAlloc(NULL, size, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE);
 }
 
@@ -81,14 +81,14 @@ void print_char(char c) {
     WriteConsoleA(console_output_handle, &c, 1, &bytes_written, NULL);
 }
 
-int console_out(const char* output, size_t length) {
+int console_out(const char* output, usize length) {
     DWORD bytes_written;
     assert(length <= ULONG_MAX);
     WriteConsoleA(console_output_handle, output, (DWORD)length, &bytes_written, NULL);
     return bytes_written;
 }
 
-int console_error(const char* error, size_t length) {
+int console_error(const char* error, usize length) {
     DWORD bytes_written;
     assert(length <= ULONG_MAX);
     WriteConsoleA(console_error_handle, error, (DWORD)length, &bytes_written, NULL);
@@ -113,7 +113,7 @@ BOOL init_console_handles(void) {
     return TRUE;
 }
 
-void flush_cpu_cache(void* mem, size_t code_size) {
+void flush_cpu_cache(void* mem, usize code_size) {
     FlushInstructionCache(GetCurrentProcess(), mem, code_size);
 }
 
@@ -202,15 +202,15 @@ FileBuf platform_read_entire_file(String path, Arena *arena) {
 
 #endif // 0
 
-bool close_file(HANDLE file) {
+b32 close_file(HANDLE file) {
     return CloseHandle(file);
 }
 
-bool get_file_size(const char* path, size_t* size) {
+b32 get_file_size(const char* path, usize* size) {
     return false;
 }
 
-/*bool console_read_line(char* line, size_t length) {
+/*b32 console_read_line(char* line, usize length) {
     DWORD bytes_read;
     assert(length <= ULONG_MAX);
     return ReadConsoleA(console_input_handle, line, (DWORD)length, &bytes_read, NULL);

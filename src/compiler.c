@@ -32,7 +32,7 @@ typedef struct {
     CodeGen codegen;
 
     uint16_t *bytecode;
-    size_t bytecode_size;
+    usize bytecode_size;
     Arena *arena;
     Arena *code_arena;
     Arena *temp_arena;
@@ -133,7 +133,7 @@ void compiler_lex_file(Compiler *c, const FileBuf *input_file) {
 
     while ((token = lex_next(&c->lexer)).type != T_END) {
         if (UNLIKELY(lexer->size >= lexer->cap)) {
-            size_t new_cap = lexer->cap * 2;
+            usize new_cap = lexer->cap * 2;
             Token *new_tokens = realloc_array(c->arena, lexer->tokens, Token, lexer->cap, new_cap);
             lexer->cap = new_cap;
             lexer->tokens = new_tokens;
@@ -147,12 +147,12 @@ void compiler_lex_file(Compiler *c, const FileBuf *input_file) {
     c->stage = STAGE_LEXED;
 }
 
-String source_line(String source, size_t lineno) {
+String source_line(String source, usize lineno) {
     // This is suboptimal as we are scanning source each time but sufficient for debug printing
-    size_t cur_line = 1;
-    size_t start = 0;
+    usize cur_line = 1;
+    usize start = 0;
 
-    for (size_t i = 0; i < source.len; i++) {
+    for (usize i = 0; i < source.len; i++) {
         if (cur_line == lineno) {
             start = i;
             break;
@@ -167,7 +167,7 @@ String source_line(String source, size_t lineno) {
     }
 
     // find end of line
-    size_t end = start;
+    usize end = start;
     while (end < source.len && source.data[end] != '\n') end++;
 
     return (String) {
@@ -182,9 +182,9 @@ void debug_print_lexer(Compiler *c) {
     assert(lexer->size > 0);
     StringBuilder sb = sb_create_temp(*c->temp_arena);
     
-    size_t cur_line = lexer->tokens[0].line;
+    usize cur_line = lexer->tokens[0].line;
 
-    for (size_t i = 0; i < lexer->size; i++) {
+    for (usize i = 0; i < lexer->size; i++) {
         Token cur = lexer->tokens[i];
         sb_build(&sb, i);
         sb_build(&sb, S(":L"));
@@ -202,7 +202,7 @@ void debug_print_lexer(Compiler *c) {
     }
     sb_build(&sb, S("==========\n"));
 #if 1   // switch used here as source_line() is incredibly slow but fine for debugging
-    for (size_t i = 0; i < lexer->size; i++) {
+    for (usize i = 0; i < lexer->size; i++) {
         Token cur = lexer->tokens[i];
 
         if (cur.line != cur_line) {
@@ -247,7 +247,7 @@ void compiler_parse(Compiler *c) {
     // Fixup, touch all the nodes for paging
     // TODO: investigate RIORegisterBuffer for win32 for touching pages:
     // https://serverframework.com/asynchronousevents/2011/10/windows-8-registered-io-buffer-strategies.html
-    for (size_t i = 0; i < parser->node_cap; i++) {
+    for (usize i = 0; i < parser->node_cap; i++) {
         parser->nodes[i] = (ParserNode){0};
     }
 
@@ -263,18 +263,18 @@ void print_sb(StringBuilder sb) {
     print(sb.buffer);
 }
 
-void sb_indent(StringBuilder *sb, size_t depth) {
-    for (size_t i = 0; i < depth; i++) sb_build(sb, S("--"));
+void sb_indent(StringBuilder *sb, usize depth) {
+    for (usize i = 0; i < depth; i++) sb_build(sb, S("--"));
 }
 
 StringBuilder g_sb;
 
-void sb_lhs(size_t index) {
+void sb_lhs(usize index) {
     sb_build(&g_sb, S("(lhs = "));
     sb_build(&g_sb, index);
 }
 
-void sb_rhs(size_t index) {
+void sb_rhs(usize index) {
     sb_build(&g_sb, S(", rhs = "));
     sb_build(&g_sb, index);
     sb_build(&g_sb, S(")"));
@@ -345,7 +345,7 @@ void debug_print_parser(Compiler *c) {
     assert(p.node_count > 0);
     g_sb = sb_create_temp(*c->temp_arena);
 
-    for (size_t i = 0; i < p.node_count; i++) {
+    for (usize i = 0; i < p.node_count; i++) {
         ParserNode n = p.nodes[i];
         sb_build(&g_sb, i);
         sb_build(&g_sb, S(": "));

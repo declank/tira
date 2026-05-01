@@ -6,8 +6,8 @@
 typedef struct Arena Arena;
 struct Arena {
     uint8_t* base;
-    size_t size;
-    size_t used;
+    usize size;
+    usize used;
     Arena *prev;
 };
 
@@ -17,56 +17,52 @@ typedef struct {
 } TempArena;
 
 typedef struct {
-    void *ptr;
-    size_t count;
-    size_t cap;
+    void *data;
+    usize count;
+    usize cap;
 } DynArray;
 
-#define dyn_array_push(arena, arr, type) \
-    (dyn_array_maybe_grow((arena), (arr), sizeof(type), _Alignof(type)), \
-    &((type*)(arr)->ptr[(arr)->count++]))
+#define array_push(arena, arr, type) \
+    (dyn_array_maybe_grow((arena), (arr), sizeof(type), __alignof(type)), \
+    &((type*)(arr)->data[(arr)->count++]))
 
-static void dyn_array_maybe_grow(Arena *a, DynArray *arr, size_t elem_size, size_t align);
+static void dyn_array_maybe_grow(Arena *a, DynArray *arr, usize elem_size, usize align);
 
-Arena arena_create_ex(size_t size, void* (*alloc_fn)(size_t));
+Arena arena_create_ex(usize size, void* (*alloc_fn)(usize));
 
-#define kilobytes(x) ((size_t)(x) * 1024ULL)
-#define megabytes(x) (kilobytes(x) * 1024ULL)
-#define gigabytes(x) (megabytes(x) * 1024ULL)
+static usize arena_default_reserve_size = megabytes(64);
+static usize arena_default_commit_size = kilobytes(64);
 
-static size_t arena_default_reserve_size = megabytes(64);
-static size_t arena_default_commit_size = kilobytes(64);
+void *mem_alloc(usize size);
+void *mem_alloc_code(usize size);
 
-void *mem_alloc(size_t size);
-void *mem_alloc_code(size_t size);
-
-#define new(arena, type, count) (type *)alloc((arena), sizeof(type), _Alignof(type), count)
+#define new(arena, type, count) (type *)alloc((arena), sizeof(type), __alignof(type), count)
 #define realloc_array(arena, base, type, old_count, new_count) \
-    (type *)realloc_array_((arena), (base), sizeof(type), _Alignof(type), old_count, new_count)
+    (type *)realloc_array_((arena), (base), sizeof(type), __alignof(type), old_count, new_count)
 #define mem_zero(ptr) __builtin_memset((ptr), 0, sizeof(*(ptr)))
 
-Arena arena_create(size_t size);
-Arena arena_create_code(size_t size);
+Arena arena_create(usize size);
+Arena arena_create_code(usize size);
 void arena_reset(Arena* arena);
 
-void *arena_push(Arena* arena, size_t count);
+void *arena_push(Arena* arena, usize count);
 void arena_pop_to(Arena *arena, void *pos);
-void arena_pop_bytes(Arena *arena, size_t num_bytes);
+void arena_pop_bytes(Arena *arena, usize num_bytes);
 
 TempArena temp_begin(Arena *arena);
 void temp_end(TempArena temp);
 
-void *alloc(Arena *a, size_t size, size_t align, size_t count);
-void *realloc_array_(Arena *a, void *base, size_t elem_size, size_t align, size_t old_count, size_t new_count);
+void *alloc(Arena *a, usize size, usize align, usize count);
+void *realloc_array_(Arena *a, void *base, usize elem_size, usize align, usize old_count, usize new_count);
 
 
-//inline void *memset(void* dest, int ch, size_t count);
-void *memcpy(void * restrict dest, const void *restrict src, size_t count);
-void *memzero(void *ptr, size_t count);
-void *memset(void* dest, int ch, size_t count);
-int memcmp(const void* lhs, const void* rhs, size_t count);
-void *memchr(const void *ptr, int ch, size_t count);
+//inline void *memset(void* dest, int ch, usize count);
+void *memcpy(void * restrict dest, const void *restrict src, usize count);
+void *memzero(void *ptr, usize count);
+void *memset(void* dest, int ch, usize count);
+int memcmp(const void* lhs, const void* rhs, usize count);
+void *memchr(const void *ptr, int ch, usize count);
 
-static inline size_t next_capacity(size_t count);
+static inline usize next_capacity(usize count);
 
 

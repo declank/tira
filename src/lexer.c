@@ -36,9 +36,9 @@ static String token_type_strings[] = {
 
 typedef struct {
     TokenType type;
-    size_t start;
-    size_t length;
-    size_t line;
+    usize start;
+    usize length;
+    usize line;
 } Token;
 
 typedef struct {
@@ -59,15 +59,15 @@ typedef struct {
 
 typedef struct {
     Token *tokens;
-    size_t size;
-    size_t cap;
+    usize size;
+    usize cap;
 
     String input;
-    size_t pos;
-    bool at_line_start;
+    usize pos;
+    b32 at_line_start;
 
-    size_t line;
-    size_t col;
+    usize line;
+    usize col;
 
     InternTable table;
 } Lexer;
@@ -97,12 +97,12 @@ static const KeywordEntry lexer_keywords[] = {
     { "const",  5, T_CONST  },
     { "while",  5, T_WHILE  },
 };
-static int lexer_keyword_count = countof(lexer_keywords);
+static int lexer_keyword_count = ARR_COUNT(lexer_keywords);
 
 static const KeywordEntry directives[] = {
     { "#import",  7, T_DIRECTIVE },
 };
-static int directives_count = countof(directives);
+static int directives_count = ARR_COUNT(directives);
 
 
 static uint64_t kw_identifier_hash(const char *str, uint32_t len) { // fnv1a
@@ -308,7 +308,7 @@ static b32 skip_block_comment(Lexer *L) {
 
 Token lex_next(Lexer *L);
 
-static inline bool is_hex_digit(char c) {
+static inline b32 is_hex_digit(char c) {
     return is_digit(c) ||
         (c >= 'a' && c <= 'f') ||
         (c >= 'A' && c <= 'F');
@@ -574,5 +574,10 @@ Token lex_next(Lexer *L) {
     L->at_line_start = false;
     tok.length = L->pos - tok.start;
     return tok;
+}
+
+void lexer_thread_entry(void *params) {
+    i64 thread_idx;
+
 }
 

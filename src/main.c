@@ -1,8 +1,33 @@
 
-#include "string.h"
-static int _hits[65536];
+////////////////////////////////////////////////////////////
+// TODO notes
+//
+// Spawn multiple threads and have the lexer run on these
+// Introduce precision timers and simple profiling functionality in the base layer
+// Run profiling against the lexer just implemented (e.g. 1 thread vs 16 thread test run)
+// Changes to the base layer for type defintions used (e.g. s32, s64 etc.)
+// Clean up the parser code so that it is clearer
+// Write a test case for semantic analysis covering all identifiers in a file
+// Move the parser to be multi-threaded
+// Move the code emitter to be multi-threaded
+// Run the syntehtic benchmarks comparing the threaded approach, weirdly expecting the lexer to be much faster
+// Have the REPL:
+//   1) do basic expressions "5 + 2 * 6"
+//   2) call the C functions "e.g. puts("hello")"
+//   3) test assignment "var str = read_line()" and "var x = 5 + 2"
+//   4) Be able to re-run "main" from the REPL
+//
 
-#define HIT() (_hits[__LINE__]++)
+////////////////////////////////////////////////////////////
+// Recently completed
+// 
+// Rename: countof -> ARR_COUNT, lengthof -> CSTR_LEN
+// Basic threading primitives added
+// Clean up of general codebase
+// Improvements of codegen to allow for comments when viewed in GDB/LLDB
+// 
+
+
 
 #include <assert.h>
 #include <limits.h>
@@ -12,6 +37,7 @@ static int _hits[65536];
 #include <stdint.h>
 
 #include "common.h"
+#include "string.h"
 #include "memory.c"
 #include "string.c"
 #include "platform.h"
@@ -23,103 +49,87 @@ static int _hits[65536];
 #include "compiler.c"
 //#include "runtime.c"
 
-void print_arena_usage(Arena arena, Arena nodes_arena, Arena stmts_arena) {
-    if (arena.used >= 1024 * 1024) {
-        printf("Arena usage: %dMB\n", (int)(arena.used / 1024 / 1024));
-    } else if (arena.used >= 1024) {
-        printf("Arena usage: %dKB\n", (int)(arena.used / 1024));
-    } else {
-        printf("Arena usage: %d bytes\n", (int)arena.used);
-    }
-
-    if (nodes_arena.used >= 1024 * 1024) {
-        printf("Nodes arena usage: %dMB\n", (int)(nodes_arena.used / 1024 / 1024));
-    } else if (nodes_arena.used >= 1024) {
-        printf("Nodes arena usage: %dKB\n", (int)(nodes_arena.used / 1024));
-    } else {
-        printf("Nodes arena usage: %d bytes\n", (int)nodes_arena.used);
-    }
-
-    if (stmts_arena.used >= 1024 * 1024) {
-        printf("Statements arena usage: %dMB\n", (int)(stmts_arena.used / 1024 / 1024));
-    } else if (stmts_arena.used >= 1024) {
-        printf("Statements arena usage: %dKB\n", (int)(stmts_arena.used / 1024));
-    } else {
-        printf("Statements arena usage: %d bytes\n", (int)stmts_arena.used);
-    }
-}
-
-void tests(void) {
-    printf("%d\n", 20);
-    printf("%d\n", -20);
-    printf("======\n");
-    printf("%+d\n", 20);
-    printf("%+d\n", -20);
-    printf("%+d\n", 0);
-    printf("%+d\n", INT_MAX);
-    printf("%+d\n", INT_MIN);
-
-    exit(0);
-}
-
 typedef enum {
-    MM_INVALID,
-    MM_FUNCTION,
-    MM_GLOBAL_VAR,
-} ModuleMappingType;
+    EXEC_MODE_COMPILER,
+    EXEC_MODE_HELP,
+//    EXEC_MODE_REPL,
+} ExecutionMode;
 
 typedef struct {
-    ModuleMappingType type;
-    const char *name;
-    void *ptr;
-} ModuleMapping;
+    String exec_name;
+    StringList input_list;
+    StringList flags;
+} CommandLine;
 
-typedef struct {
-    uint64_t dummy;
-} TiraContext;
+static Arena arena = {0};
 
-typedef String TiraString;
+void print_help_message(void) {
+    const char help_message[] =
+        "OVERVIEW: Tira compiler and REPL.\n"
+        "\n"
+        "USAGE: tira [options] file..."
+        "\n"
+        "OPTIONS:\n"
+        "  --help:    Show this help message\n"
+//        "  --repl:    Start the REPL with the specified input files\n"
+        ;
+    
+    printf("%s", help_message);
+}
+
+CommandLine args_to_command_line(int argc, const char *argv[]) {
+    CommandLine cmd = {0};
+    cmd.exec_name = str_from_cstr(argv[0]);
+
+    // Parse flags and inputs
+    for each_count_nz(i, argc) {
+        String str = str_from_cstr(argv[i]);
+
+        if (argv[i][0] == '-')  {
+            stringlist_push(&arena, &cmd.flags, str);
+        } else {
+            stringlist_push(&arena, &cmd.input_list, str);
+        }
+    }
+
+    return cmd;
+}
+
+#define make(T, count) new(&arena, T, count)
 
 int main(int argc, const char *argv[]) {
-    if (argc != 2) {
-        tira_error("Input file not specified. Exiting.\n");
-        return 1;
-    }
+    arena = arena_create(megabytes(4));
 
-    Arena arena = arena_create(megabytes(16));
-    Arena code_arena = arena_create_code(megabytes(4));
-    Arena temp_arena = arena_create(megabytes(16));
-    Arena nodes_arena = arena_create(megabytes(16));
-    Arena stmts_arena = arena_create(megabytes(16));
+    CommandLine cmd = args_to_command_line(argc, argv);
+    ExecutionMode mode = EXEC_MODE_COMPILER;
 
-    Compiler c = compiler_init(&arena, &code_arena, &temp_arena, &nodes_arena, &stmts_arena);
-    FileBuf input_file;
+    if (string_in_stringlist(S("--help"), cmd.flags)) {
+        print_help_message();
+        exit(0);
+    } /* else if (cmd_line_has_flag(cmd, S("repl"))) {
+        mode = EXEC_MODE_REPL;
+    } */
 
-    if (!read_entire_file(&input_file, argv[1], &arena)) {
-        tira_error("Unable to read input file\n");
+    if (!cmd.input_list.count) {
+        tira_error("Error: Input file(s) not specified.\n");
         exit(1);
     }
 
-    //print(input_file);
-    compiler_lex_file(&c, &input_file);   
-    #ifdef DEBUG
-    debug_print_lexer(&c);
-    #endif
+    int cores = os_get_logical_cores();
+    Thread *threads = make(Thread, cores);
 
-    compiler_parse(&c);
-    #ifdef DEBUG
-    debug_print_parser(&c);
-    #endif
-    compiler_codegen(&c, argv[1]);
-
-    print_arena_usage(arena, nodes_arena, stmts_arena);
-
-    printf("HIT REPORT:\n");
-    for (int i = 0; i < 65536; i++) {
-        if (_hits[i]) {
-            printf("Line %u: %d hits\n");
+    String file_contents;
+    for each_node(filename, StringNode, cmd.input_list.first) {
+        // for now just append to the one string
+        if (!read_entire_file(&file_contents, filename->s.data, &arena)) {
+            tira_error("Unable to read file: %S", filename);
         }
     }
+
+    threads_spawn(threads, cores, lexer_thread_entry, &file_contents);
+    threads_join(threads, cores);
+
+    
 
     return 0;
 }

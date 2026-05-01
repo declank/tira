@@ -2,16 +2,18 @@
 
 #include "string.h"
 
-size_t strlen(const char* str) {
+usize strlen(const char* str) {
     const char *s = str;
     while (*s) ++s;
-    return (size_t)(s - str);
+    return (usize)(s - str);
 }
 
 int string_compare(String lhs, String rhs) {
-    for (size_t i = 0; *lhs.data == *rhs.data && (i< (lhs.len-1) && (i<rhs.len-1)); lhs.data++, rhs.data++, i++);
+    /* for (usize i = 0; *lhs.data == *rhs.data && (i< (lhs.len-1) && (i<rhs.len-1)); lhs.data++, rhs.data++, i++);
     uint8_t ret_val = (uint8_t)*lhs.data - (uint8_t)*rhs.data; 
-    return ret_val;
+    return ret_val; */
+
+    return 0;
 }
 
 int strcmp(const char *lhs, const char *rhs) {
@@ -25,7 +27,7 @@ StringBuilder sb_create_temp(Arena arena) {
     return sb;
 }
 
-static inline size_t sb_remaining(const StringBuilder *sb) {
+static inline usize sb_remaining(const StringBuilder *sb) {
     return sb->capacity - sb->buffer.len;
 }
 
@@ -35,7 +37,7 @@ void sb_newline(StringBuilder *sb) {
 }
 
 void sb_build_string(StringBuilder *sb, String s) {
-    size_t remaining = sb_remaining(sb);
+    usize remaining = sb_remaining(sb);
     if (s.len > remaining) return;
 
     if (memcpy(sb->buffer.data + sb->buffer.len, s.data, s.len) != NULL) {
@@ -50,7 +52,7 @@ void sb_build_char(StringBuilder *sb, char c) {
 }
 
 void sb_build_i64(StringBuilder *sb, int64_t i) {
-    size_t remaining = sb_remaining(sb);
+    usize remaining = sb_remaining(sb);
 
     if (i == 0 && remaining > 0) {
         sb->buffer.data[sb->buffer.len++] = '0';
@@ -73,7 +75,7 @@ void sb_build_i64(StringBuilder *sb, int64_t i) {
 
 
 void sb_build_u64(StringBuilder *sb, uint64_t u) {
-    size_t remaining = sb_remaining(sb);
+    usize remaining = sb_remaining(sb);
 
     if (u == 0 && remaining > 0) {
         sb->buffer.data[sb->buffer.len++] = '0';
@@ -92,16 +94,16 @@ void sb_build_u64(StringBuilder *sb, uint64_t u) {
     while (ti--) { sb->buffer.data[sb->buffer.len++] = temp[ti]; }
 }
 
-bool string_to_double(String str, double *out) {
+b32 string_to_double(String str, double *out) {
     if (!str.len) return false; // TODO check that this is unsigned
 
     double result = 0.0;
     double fraction = 0.0;
     double divisor = 1.0;
     
-    bool negative = false;
-    bool in_fraction = false;
-    size_t i = 0;
+    b32 negative = false;
+    b32 in_fraction = false;
+    usize i = 0;
 
     if (str.data[i] == '-') { negative = true; i++; }
     else if (str.data[i] == '+') { i++; }
@@ -128,13 +130,13 @@ bool string_to_double(String str, double *out) {
     
 }
 
-bool string_to_int64(String str, int64_t *out) {
+b32 string_to_int64(String str, int64_t *out) {
     if (!str.len) return false; // TODO check that this is unsigned
 
     int64_t result = 0;
 
-    bool negative = false;
-    size_t i = 0;
+    b32 negative = false;
+    usize i = 0;
 
     if (str.data[i] == '-') { negative = true; i++; }
     else if (str.data[i] == '+') { i++; }
@@ -179,6 +181,33 @@ bool string_to_int64(String str, int64_t *out) {
     return true;
 }
 
-bool string_equal(String lhs, String rhs) {
+b32 string_equal(String lhs, String rhs) {
     return string_compare(lhs, rhs) == 0;
+}
+
+b32 string_in_stringlist(String str, StringList list) {
+    for each_node(str_node, StringNode, list.first) {
+        if (string_compare(str_node->s, str) == 0) return true;
+    }
+
+    return false;
+}
+
+/* StringNode *stringlist_push_node(StringList *list, StringNode *node) {
+    ssl_push_back(list->first, list->last, node);
+
+    list->count += 1;
+    list->total_size += node->s.len;
+    return node;
+} */
+
+String str_from_cstr(const char *cstr) {
+    return (String) {
+        .data = (char*)cstr,
+        .len = strlen(cstr),
+    };
+}
+
+StringNode *stringlist_push(Arena *arena, StringList *list, String str) {
+    
 }

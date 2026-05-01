@@ -3,6 +3,8 @@
 setlocal enabledelayedexpansion
 cd /D "%~dp0"
 
+if not exist build mkdir build
+
 clang -g -std=c17 -o build\tira.exe src\main.c src\platform_win32.c ^
     -Wall -Wextra -Wfloat-conversion -Wdouble-promotion -Wconversion -Wimplicit-fallthrough -pedantic ^
     -Wno-unused-parameter -Wno-unused-function -Wno-sign-conversion ^

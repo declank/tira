@@ -61,7 +61,7 @@ typedef enum : uint8_t {
 
 typedef struct {
     String str;
-    size_t hash;
+    usize hash;
 } InternedStr;
 
 // clang-format off
@@ -86,24 +86,24 @@ typedef enum {
 } TypeInfo;
 
 typedef struct {
-    bool is_array;
-    bool is_dynamic;
+    b8 is_array;
+    b8 is_dynamic;
 } TypeInfoStruct;
 
 typedef struct { ParserNode **stmts; Param *params; uint16_t statements_count; uint16_t statements_cap; uint16_t params_count; } Node_Block;
 typedef struct { ParserNode *identifier; ParserNode *block; FuncData *func_data; } Node_FuncDecl;
-typedef struct { ParserNode *callee; ParserNode **args; size_t args_count; } Node_FuncCall;
+typedef struct { ParserNode *callee; ParserNode **args; usize args_count; } Node_FuncCall;
 typedef struct { ParserNode *expr; } Node_Return;
 typedef struct { ParserNode **identifiers; uint16_t identifier_count; ParserNode *rhs; /* TypeInfo *type_decl; */ } Node_ConstVarDecl;
 typedef struct { ParserNode *lhs; ParserNode *rhs; } Node_Assign;
-typedef struct { ParserNode **elems; size_t count; ParserNode *length_expr; } Node_ArrayLiteral;
+typedef struct { ParserNode **elems; usize count; ParserNode *length_expr; } Node_ArrayLiteral;
 typedef struct { TokenType op; ParserNode *lhs; ParserNode *rhs; } Node_BinaryOp;
 typedef struct { ParserNode *cond; ParserNode *then_branch; ParserNode *else_branch; } Node_IfExpr;
 typedef struct { ParserNode *base; ParserNode *index; } Node_Index;
 typedef struct { ParserNode *lhs; ParserNode *rhs; b8 inclusive; } Node_Range;
-typedef struct { ParserNode *lhs; size_t member_tok_index; } Node_DotAccess;
+typedef struct { ParserNode *lhs; usize member_tok_index; } Node_DotAccess;
 typedef struct { TokenType op; ParserNode *expr; } Node_Unary;
-typedef struct { ParserNode **targets; ParserNode **values; size_t count; } Node_Aggregate;
+typedef struct { ParserNode **targets; ParserNode **values; usize count; } Node_Aggregate;
 typedef struct { ParserNode *cond; ParserNode *then_expr; ParserNode *else_expr; } Node_Ternary;
 typedef struct { ParserNode *ident; ParserNode *iter_expr; ParserNode *block; } Node_ForExpr;
 typedef struct { ParserNode *cond; ParserNode *block; } Node_WhileExpr;
@@ -174,12 +174,12 @@ struct ParserNode { // minimised from 64 to 40 bytes
     };
 };
 
-bool hash_match(size_t hash1, size_t hash2) {
+b32 hash_match(usize hash1, usize hash2) {
     // TODO
     return false;
 }
 
-bool params_match(Param *a, Param *b) {
+b32 params_match(Param *a, Param *b) {
     if (a == b) return true;
     if (!a || !b) return false;
 
@@ -189,7 +189,7 @@ bool params_match(Param *a, Param *b) {
     return false;
 }
 
-bool nodes_match(ParserNode *a, ParserNode *b) {
+b32 nodes_match(ParserNode *a, ParserNode *b) {
     if (a == b) return true;
     if (!a || !b) return false;
     if (a->kind != b->kind) return false;
@@ -277,7 +277,7 @@ typedef enum {
 static const char *op_kind_strings[] = {
     "+", "-",  "*",  "/",  "%",  "==", "!=", "<",
     ">", "<=", ">=", "&&", "||", "!",  "|"};
-_Static_assert(countof(op_kind_strings) == OP_COUNT,
+_Static_assert(ARR_COUNT(op_kind_strings) == OP_COUNT,
                "op_kind_strings must match OpKind count");
 
 static inline int get_op_precedence(OpKind op) {
@@ -722,10 +722,10 @@ static ParserNode *parse_func_decl(Parser *p) {
     ParserNode *identifier = parse_identifier(p);
 
     TypeParam *type_params = NULL;
-    size_t type_params_count = 0;
+    usize type_params_count = 0;
 
     Param *params = NULL;
-    size_t params_count = 0;
+    usize params_count = 0;
 
     if (peek(p)->type == T_LPAREN) {
         advance(p);
@@ -1013,7 +1013,7 @@ static ParserNode *parse_call(Parser *p, ParserNode *lhs) {
 
     ParserNode *node = new_node(p, NODE_FUNC_CALL, previous_token_index(p));
     ParserNode **args = NULL;
-    size_t count = 0;
+    usize count = 0;
 
     if (peek(p)->type != T_RPAREN) {
         do {
@@ -1143,7 +1143,7 @@ static ParserNode *parse_number(Parser *p) {
 
     Token *tok = previous(p);
     char *start = p->source.data + tok->start;
-    bool ok = false;
+    b32 ok = false;
 
     if (memchr(start, '.', tok->length)) {
         ok = string_to_double((String){.data = start, .len = tok->length}, &node->real_value);
@@ -1206,7 +1206,7 @@ static ParserNode *parse_array_lit(Parser *p) {
 
     ParserNode *node = new_node(p, NODE_ARRAY_LITERAL, previous_token_index(p));
     ParserNode **elems = NULL;
-    size_t count = 0;
+    usize count = 0;
 
     if (peek(p)->type != T_RSQBRACKET) {
         do {

@@ -6,7 +6,7 @@
 #include "string.h"
 typedef struct {
     char    *data;
-    size_t   len;
+    usize   len;
     uint32_t id;
 } StringEntry;
 
@@ -21,12 +21,12 @@ typedef struct {
     
     // output buffers — data and text emitted separately, merged at end
     char  *data_buf;
-    size_t data_used;
-    size_t data_cap;
+    usize data_used;
+    usize data_cap;
     
     char  *text_buf;
-    size_t text_used;
-    size_t text_cap;
+    usize text_used;
+    usize text_cap;
 
     // string literal table
     StringEntry strings[2048];
@@ -57,16 +57,16 @@ static void codegen_node(CodeGen *g, ParserNode *node);
 
 static void emit(CodeGen *g, const char *fmt, ...) {
     va_list ap;
-    size_t remaining = g->text_cap - g->text_used;
+    usize remaining = g->text_cap - g->text_used;
     va_start(ap, fmt);
     int needed = vsnprintf(g->text_buf + g->text_used, remaining, fmt, ap);
     va_end(ap);
 
     if (needed < 0) return; // encoding error
 
-    if ((size_t)needed >= remaining) {
+    if ((usize)needed >= remaining) {
         // didn't fit — grow and retry
-        size_t new_cap = next_pow2(g->text_used + needed + 1);
+        usize new_cap = next_pow2(g->text_used + needed + 1);
         g->text_buf = realloc_array(g->arena, g->text_buf, char, g->text_cap, new_cap);
         g->text_cap = new_cap;
 
@@ -81,7 +81,7 @@ static void emit(CodeGen *g, const char *fmt, ...) {
 
 static void emit_char(CodeGen *g, char c) {
     if (UNLIKELY(g->text_used >= g->text_cap)) {
-        size_t new_cap = g->text_cap * 2;
+        usize new_cap = g->text_cap * 2;
         g->text_buf = realloc_array(g->arena, g->text_buf, char, g->text_cap, new_cap);
         g->text_cap = new_cap;
     }
@@ -102,7 +102,7 @@ static uint32_t emit_label(CodeGen *g) {
     return g->label_count++;
 }
 
-String source_line(String source, size_t lineno); // forward decl. compiler.c
+String source_line(String source, usize lineno); // forward decl. compiler.c
 
 void emit_source_line(CodeGen *g, ParserNode *node) {
     Token tok = g->parser->tokens[node->tok_index];
@@ -177,7 +177,7 @@ static void codegen_func_decl(CodeGen *g, ParserNode *node) {
 
     // function label
     const char *name = ident->identifier.str.data;
-    size_t      nlen = ident->identifier.str.len;
+    usize      nlen = ident->identifier.str.len;
     String      func_name = (String) {(char*)name, nlen};
     emit(g, "\n%S:\n", func_name);
 
@@ -199,7 +199,7 @@ static void codegen_func_decl(CodeGen *g, ParserNode *node) {
     g->function_count++;
 }
 
-static uint32_t codegen_intern_string(CodeGen *g, char *data, size_t len) {
+static uint32_t codegen_intern_string(CodeGen *g, char *data, usize len) {
     // check if already interned
     for (uint32_t i = 0; i < g->string_count; i++)
         if (g->strings[i].len == len && memcmp(g->strings[i].data, data, len) == 0)
@@ -213,7 +213,7 @@ static uint32_t codegen_intern_string(CodeGen *g, char *data, size_t len) {
 static void codegen_string_literal(CodeGen *g, ParserNode *node) {
     // strip quotes
     char    *data = node->string.data + 1;
-    size_t   len  = node->string.len  - 2;
+    usize   len  = node->string.len  - 2;
     uint32_t id   = codegen_intern_string(g, data, len);
     // result: rdi = ptr, rsi = len
     emit(g, "    lea  rdi, [.LC%d]\n", id);
@@ -346,7 +346,7 @@ static void codegen_emit_data_section(CodeGen *g) {
         emit(g, "    .asciz \"");
 
         // emit the string bytes, escaping special chars
-        for (size_t j = 0; j < s->len; j++) {
+        for (usize j = 0; j < s->len; j++) {
             char c = s->data[j];
             emit_char(g, c);
         }

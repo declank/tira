@@ -1,0 +1,24 @@
+
+
+main {
+    if args.count != 2 {
+        print_error("Input file not specified.\n");
+        exit(1);
+    }
+
+    var src    = read_entire_file(args[1]);
+    var tokens = lex(src);
+    var ast    = parse_tokens(tokens);
+
+    var env = typecheck_env_create();
+    var ok  = typecheck(ast, env);
+
+    if !ok {    
+        print_errors(env);
+        exit(1);
+    }
+
+    var asm = emit_asm(ast, env, debug=true);
+    write_file("out.s", asm);
+}
+

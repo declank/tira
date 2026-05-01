@@ -7,7 +7,7 @@
 
 typedef struct {
     char *data;
-    size_t len;
+    usize len;
 } String;
 
 void puts_tira(String str) {

@@ -5,11 +5,37 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Launch",
+            "name": "(gdb) Launch",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceRoot}/build/tira_debug",
+            "args": ["--help"],
+            "stopAtEntry": false,
+            "cwd": "${workspaceRoot}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "preLaunchTask": "build",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                },
+                {
+                    "description": "Set Disassembly Flavor to Intel",
+                    "text": "-gdb-set disassembly-flavor intel",
+                    "ignoreFailures": true
+                }
+            ]
+        },
+        {
+            "name": "(lldb) Launch",
             "type": "lldb",
             "request": "launch",
             "program": "${workspaceRoot}/build/tira_debug",
-            "args": ["tira_pkgs/repl/repl.tira"],
+            "args": ["--help"],
+            //"args": ["tira_pkgs/repl/repl.tira"],
             "cwd": "${workspaceRoot}",
             "preLaunchTask": "build",
             "terminal": "console",       // use the debug console

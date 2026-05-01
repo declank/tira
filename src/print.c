@@ -4,7 +4,7 @@
 #include "platform.h"
 
 
-int vsnprintf(char *buffer, size_t bufsz,  const char *format, va_list vlist);
+int vsnprintf(char *buffer, usize bufsz,  const char *format, va_list vlist);
 int error(const char *fmt, ...);
 
 int printf(const char* restrict format, ...);
@@ -13,17 +13,17 @@ int printf(const char* restrict format, ...);
 #define VSNPRINTF_DIV_OUT       
 #define VSNPRINTF_OUT_DIGIT     
 
-/* int vsnprintf_putc(char *buffer, const char **format, size_t rem, char c) {
+/* int vsnprintf_putc(char *buffer, const char **format, usize rem, char c) {
     if (rem > 1) { *buffer++ = *(*format++); rem--; }
 }*/
 
 // TODO add back in restrict on buffer and format
-int vsnprintf(char *buffer, size_t bufsz,
+int vsnprintf(char *buffer, usize bufsz,
               const char *format, va_list vlist) {
     char *start = buffer;   
     if (bufsz == 0) buffer = NULL;
-    size_t rem = bufsz;
-    bool enforce_sign = false; 
+    usize rem = bufsz;
+    b32 enforce_sign = false; 
 
     while (*format) {
         //char c = *format;
@@ -66,7 +66,7 @@ int vsnprintf(char *buffer, size_t bufsz,
 
         // TODO factor out sizing
         if (*format == 'z' && format[1] == 'u') {
-            size_t v = va_arg(vlist, size_t);
+            usize v = va_arg(vlist, usize);
 
             if (enforce_sign) { *buffer++ = '+'; rem--; }
             
@@ -76,7 +76,7 @@ int vsnprintf(char *buffer, size_t bufsz,
                 format += 2; continue;
             }
 
-            size_t i = 0;
+            usize i = 0;
             while (v > 0) { tmp[i++] = '0' + v % 10; v /= 10; }
 
             if (rem > i + 1) {
@@ -90,9 +90,9 @@ int vsnprintf(char *buffer, size_t bufsz,
 
         if (*format == 'd') {
             intptr_t v = va_arg(vlist, int); // TODO @Cleanup Note value is extended here (would need to then ensure INT64_MIN works correctly)
-            bool negative = false;
+            b32 negative = false;
             char tmp[16];
-            size_t i = 0;
+            usize i = 0;
 
             if (v == 0) {
                 if (enforce_sign && rem > 2) { *buffer++ = '+'; rem--; }
@@ -131,7 +131,7 @@ int vsnprintf(char *buffer, size_t bufsz,
         }
     } */
 
-    size_t written = 0;
+    usize written = 0;
     if (bufsz > 0) {
         written = bufsz - rem;
 

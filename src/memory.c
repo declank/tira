@@ -4,15 +4,15 @@
 #include "platform.h"
 #include <stdint.h>
 
-Arena arena_create(size_t size) {
+Arena arena_create(usize size) {
     return arena_create_ex(size, mem_alloc);
 }
 
-Arena arena_create_code(size_t size) {
+Arena arena_create_code(usize size) {
     return arena_create_ex(size, mem_alloc_code);
 }
 
-void *arena_push(Arena* arena, size_t count) {
+void *arena_push(Arena* arena, usize count) {
     if (arena->used + count > arena->size) return NULL;
 
     void *ptr = arena->base + arena->used;
@@ -21,7 +21,7 @@ void *arena_push(Arena* arena, size_t count) {
     return ptr;
 }
 
-Arena arena_create_ex(size_t size, void* (*alloc_fn)(size_t)) {    
+Arena arena_create_ex(usize size, void* (*alloc_fn)(usize)) {    
     Arena a = {0};
     void *mem = alloc_fn(size);
     if (!mem) {
@@ -36,13 +36,13 @@ Arena arena_create_ex(size_t size, void* (*alloc_fn)(size_t)) {
 }
 
 
-void *alloc(Arena *a, size_t size, size_t align, size_t count) {
+void *alloc(Arena *a, usize size, usize align, usize count) {
     if (!a || !a->base || size == 0 || align == 0 || count == 0) return NULL;
 
-    size_t total = size * count;
+    usize total = size * count;
     uintptr_t base = (uintptr_t)a->base + a->used;
     uintptr_t aligned = (base + (align - 1)) & ~(uintptr_t)(align - 1);
-    size_t new_used = (aligned - (uintptr_t)a->base) + total;
+    usize new_used = (aligned - (uintptr_t)a->base) + total;
 
     if (new_used > a->size) { // Arena out of memory
         tira_error("Arena out of memory\n");
@@ -54,7 +54,7 @@ void *alloc(Arena *a, size_t size, size_t align, size_t count) {
     return (void *) aligned;
 }
 
-static inline size_t next_capacity(size_t count) {
+static inline usize next_capacity(usize count) {
     //return count < 8 ? 8 : count * 2;
     return count ? count * 2 : 1;
 }
@@ -70,13 +70,13 @@ static inline uintptr_t align_down_pow2(uintptr_t val, uintptr_t align) {
 // TODO remove this performance counter
 static uint64_t realloc_moves = 0;
 
-void *realloc_array_(Arena *a, void *base, size_t elem_size, size_t align, size_t old_count, size_t new_count) {
+void *realloc_array_(Arena *a, void *base, usize elem_size, usize align, usize old_count, usize new_count) {
     uint8_t *arena_top = a->base + a->used;
     uint8_t *array_end = (uint8_t *)base + elem_size * old_count;
     b8 at_top = (base != NULL) && (array_end == arena_top);
 
     if (at_top) {
-        size_t current = (array_end - (uint8_t*)base) / elem_size;
+        usize current = (array_end - (uint8_t*)base) / elem_size;
         if (new_count > current) alloc(a, elem_size, align, new_count - current);
         return base;
     }
@@ -102,14 +102,14 @@ void *realloc_array_(Arena *a, void *base, size_t elem_size, size_t align, size_
     return new_ptr;
 }
 
-static void dyn_array_maybe_grow(Arena *a, DynArray *arr, size_t elem_size, size_t align) {
+static void dyn_array_maybe_grow(Arena *a, DynArray *arr, usize elem_size, usize align) {
     if (arr->count < arr->cap) return;
 
     uint8_t *arena_top = a->base + a->used;
-    uint8_t *array_end = (uint8_t *)arr->ptr + elem_size * arr->cap;
-    b8 at_top = arr->ptr && array_end == arena_top;
+    uint8_t *array_end = (uint8_t *)arr->data + elem_size * arr->cap;
+    b8 at_top = arr->data && array_end == arena_top;
 
-    size_t new_cap = next_capacity(arr->cap);
+    usize new_cap = next_capacity(arr->cap);
 
     if (at_top) {
         alloc(a, elem_size, align, new_cap - arr->cap);
@@ -117,47 +117,47 @@ static void dyn_array_maybe_grow(Arena *a, DynArray *arr, size_t elem_size, size
         return;
     }
 
-    void *new_ptr = alloc(a, elem_size, align, new_cap);
-    if (arr->ptr != NULL) {
-        memcpy(new_ptr, arr->ptr, elem_size * arr->cap);
+    void *new_data = alloc(a, elem_size, align, new_cap);
+    if (arr->data != NULL) {
+        memcpy(new_data, arr->data, elem_size * arr->cap);
 
-        uintptr_t page_start = align_up_pow2((uintptr_t)arr->ptr, 4096);
+        uintptr_t page_start = align_up_pow2((uintptr_t)arr->data, 4096);
         uintptr_t page_end   = align_down_pow2((uintptr_t)array_end, 4096);
 
         if (page_start < page_end)
             mem_dont_need((void *)page_start, page_end - page_start);
     }
 
-    arr->ptr = new_ptr;
+    arr->data = new_data;
     arr->cap = new_cap;
 }
 
-void *memcpy(void *restrict dest, const void *restrict src, size_t count) {
+void *memcpy(void *restrict dest, const void *restrict src, usize count) {
     uint8_t *d = dest;
     const uint8_t *s = src;
     while (count--) *d++ = *s++;
     return dest;
 }
 
-void* memzero(void *ptr, size_t count) {
+void* memzero(void *ptr, usize count) {
   return memset(ptr, 0, count);
 }
 
-void *memset(void* dest, int ch, size_t count) {
+void *memset(void* dest, int ch, usize count) {
     // TODO Alignment/SIMD optimisation or import from CRT
     uint8_t* ptr = dest;
-    for (size_t i = 0; i < count; i++) {
+    for (usize i = 0; i < count; i++) {
         ptr[i] = (uint8_t)ch;
     }
     return ptr;
 }
 
-int memcmp(const void* lhs, const void* rhs, size_t count) {
+int memcmp(const void* lhs, const void* rhs, usize count) {
     // TODO Alignment/SIMD optimisation or import from CRT
     const unsigned char* a = (const unsigned char*)lhs;
     const unsigned char* b = (const unsigned char*)rhs;
 
-    for (size_t i = 0; i < count; i++) {
+    for (usize i = 0; i < count; i++) {
         if (a[i] != b[i]) {
             return (int)(a[i] - b[i]);
         }
@@ -166,10 +166,10 @@ int memcmp(const void* lhs, const void* rhs, size_t count) {
     return 0;
 }
 
-void *memchr(const void *ptr, int ch, size_t count) {
+void *memchr(const void *ptr, int ch, usize count) {
     const uint8_t *p = ptr;
 
-    for (size_t i = 0; i < count; i++) {
+    for (usize i = 0; i < count; i++) {
         if (p[i] == (uint8_t)ch) {
             return (void *)(p + i);
         }

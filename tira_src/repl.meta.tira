@@ -1,0 +1,45 @@
+
+
+
+main {
+    var arena: FreeListArena;
+    context.allocator = arena.init();
+
+    var repl_source_counter = 0;
+    var env = typecheck_env_create();
+    var codegen = codegen_init(env);
+
+    outer: loop {
+        var line = repl_readline("> ");
+        var buf = line;
+        if line == "quit" { break; }
+
+        while is_incomplete(lex(buf)) {
+            var cont = repl_readline("* ");
+            repl_source_counter++;
+            if cont == "exit" { break outer; }
+            buf.append("\n");
+            buf.append(cont);
+        }
+
+        var source_id = sprint("repl::%", repl_source_counter);
+        repl_source_counter++;
+        debug_source_cache.insert(source_id, buf);
+
+        var tokens = lex(buf);
+        var ast = parse_expr_or_stmt(toks);
+        var ok = typecheck_incremental(ast, env);
+
+        if !ok {
+            print_errors(env);
+            continue;
+        }
+
+        var result = codegen.eval(ast, env);
+        print(result);
+
+        reset_temp_alloc();
+    }
+}
+
+

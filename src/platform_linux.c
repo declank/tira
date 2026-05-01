@@ -2,6 +2,7 @@
 #define _GNU_SOURCE // for MAP_ANONYMOUS
 
 #include <fcntl.h>
+#include <limits.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -15,17 +16,28 @@
 
 #include "platform.h"
 
+// If you need cross platform syscall numbers refer to:
+// https://www.chromium.org/chromium-os/developer-library/reference/linux-constants/syscalls/#cross-arch-numbers
+
+// CAREFUL!! these below are x86_64 specific
+
 #define SYS_read 0
 #define SYS_write 1
 #define SYS_open 2
 #define SYS_close 3
 #define SYS_fstat 5
 #define SYS_mmap 9
+#define SYS_munmap 11
 #define SYS_mprotect 10
 #define SYS_sigaction 13
 #define SYS_madvise 28
+#define SYS_clone 56
 #define SYS_exit 60
+#define SYS_futex 202
+#define SYS_sched_setaffinity 203
+#define SYS_sched_getaffinity 204
 #define SYS_clock_gettime 228
+#define SYS_clone3 435
 
 #define CLOCK_REALTIME           0
 #define CLOCK_MONOTONIC          1
@@ -93,6 +105,20 @@ static inline long syscall4(long n, long a1, long a2, long a3, long a4) {
     return ret;
 }
 
+static inline long syscall5(long n, long a1, long a2, long a3, long a4, long a5) {
+    long ret;
+
+    register long r10 __asm__("r10") = a4;
+    register long r8  __asm__("r8")  = a5;
+
+    __asm__ volatile("syscall"
+                     : "=a"(ret)
+                     : "a"(n), "D"(a1), "S"(a2), "d"(a3), "r"(r10), "r"(r8)
+                     : "rcx", "r11", "memory");
+
+    return ret;
+}
+
 static inline long syscall6(long n, long a1, long a2, long a3, long a4, long a5,
                             long a6) {
     long ret;
@@ -119,16 +145,20 @@ void exit(int status) {
     __builtin_unreachable();
 }
 
-void *mmap(void *addr, size_t length, int prot, int flags, int fd,
+void *mmap(void *addr, usize length, int prot, int flags, int fd,
            off_t offset) {
     return (void*)syscall6(SYS_mmap, (long)addr, (long)length, prot, flags, fd, offset);
 }
 
-int mprotect(void *addr, size_t size, int prot) {
+int munmap(void *addr, usize len) {
+    return (int)syscall2(SYS_munmap, (long)addr, (long)len);
+}
+
+int mprotect(void *addr, usize size, int prot) {
     return syscall3(SYS_mprotect, (long)addr, (long)size, prot);
 }
 
-ssize_t write(int fd, const void *buf, size_t count) {
+ssize write(int fd, const void *buf, usize count) {
     return syscall3(SYS_write, fd, (long)buf, (long)count);
 }
 
@@ -151,19 +181,19 @@ int close(int fd) {
     return (int)syscall1(SYS_close, (long)fd);
 }
 
-ssize_t read(int fd, void *buf, size_t count) {
+ssize read(int fd, void *buf, usize count) {
     return syscall3(SYS_read, fd, (long)buf, count);
 }
 
-int console_read(char *buffer, size_t bufsz) {
+int console_read(char *buffer, usize bufsz) {
     return read(STDIN_FILENO, buffer, bufsz);
 }
 
-int console_error(const char *error, size_t length) {
+int console_error(const char *error, usize length) {
     return write(STDERR_FILENO, error, length);
 }
 
-int console_out(const char *output, size_t length) {
+int console_out(const char *output, usize length) {
     return write(STDOUT_FILENO, output, length);
 }
 
@@ -178,7 +208,7 @@ int open_file(const char *filename) {
     return open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
 }
 
-int write_to_file(int fd, char *buf, size_t buf_size) {
+int write_to_file(int fd, char *buf, usize buf_size) {
     return write(fd, buf, buf_size);
 }
 
@@ -201,7 +231,7 @@ int platform_read_entire_file(FileBuf *buf, String path, Arena *arena) {
         return 0;
     }
 
-    size_t size = st.st_size;
+    usize size = st.st_size;
 
     uint8_t *buffer = new (arena, uint8_t, size + 1);
     if (!buffer) {
@@ -212,10 +242,10 @@ int platform_read_entire_file(FileBuf *buf, String path, Arena *arena) {
     }
 
     // read entire file
-    size_t total = 0;
+    usize total = 0;
     while (total < size) {
-        // ssize_t n = syscall3(SYS_read, fd, buffer + total, size - total);
-        ssize_t n = read(fd, buffer + total, size - total);
+        // ssize n = syscall3(SYS_read, fd, buffer + total, size - total);
+        ssize n = read(fd, buffer + total, size - total);
 
         if (n <= 0)
             break;
@@ -235,19 +265,19 @@ int platform_read_entire_file(FileBuf *buf, String path, Arena *arena) {
 #define MAP_ANONYMOUS MAP_ANON
 #endif
 
-void *mem_alloc(size_t size) {
+void *mem_alloc(usize size) {
     void *p = mmap(NULL, size, PROT_READ | PROT_WRITE,
                    MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 
     return (p != MAP_FAILED) ? p : NULL;
 }
 
-void *mem_alloc_code(size_t size) {
+void *mem_alloc_code(usize size) {
     // TODO this needs to now swap using mprotect on Linux!
     return mem_alloc(size);
 }
 
-int mem_make_executable(void *p, size_t size) {
+int mem_make_executable(void *p, usize size) {
     return mprotect(p, size, PROT_READ | PROT_EXEC);
 }
 
@@ -257,11 +287,11 @@ int getchar(void) {
     return buf[0];    
 }
 
-int madvise(void *addr, size_t size, int advice) {
+int madvise(void *addr, usize size, int advice) {
     return syscall3(SYS_madvise, (long)addr, (long)size, (long)advice);
 }
 
-int mem_dont_need(void *addr, size_t size) {
+int mem_dont_need(void *addr, usize size) {
     return madvise(addr, size, MADV_DONTNEED);
 }
 
@@ -272,12 +302,12 @@ void __assert_fail(const char *assertion,
                    unsigned int line,
                    const char *function) {
     const char prefix[] = "Assertion failed: ";
-    console_error(prefix, lengthof(prefix));
+    console_error(prefix, CSTR_LEN(prefix));
     console_error(assertion, strlen(assertion));
 
     // File
     const char file_prefix[] = ", in ";
-    console_error(file_prefix, lengthof(file_prefix));
+    console_error(file_prefix, CSTR_LEN(file_prefix));
     console_error(file, strlen(file));
 
     tira_error(":");
@@ -286,7 +316,7 @@ void __assert_fail(const char *assertion,
 
     // Function
     const char func_prefix[] = ", function ";
-    console_error(func_prefix, lengthof(func_prefix));
+    console_error(func_prefix, CSTR_LEN(func_prefix));
     console_error(function, strlen(function));
 
     console_error("\n", 1);
@@ -306,20 +336,7 @@ Time clock_time_monotonic_raw(void) {
 #define MAX_ARGS 64
 int main(int argc, const char *argv[]);
 
-/* void _start(void) {
-    register uint64_t *stack __asm__("rsp");
-
-    int argc = (int)stack[0];
-    const char **argv = (const char **)&stack[1];
-    const char **envp = (const char **)&stack[argc + 2];
-
-    __asm__ volatile("andq $-16, %%rsp" ::: "rsp");
-    
-    int ret = main(argc, argv);
-    exit(ret);
-} */
-
-#define STACK_TRACE_HANDLER
+//#define STACK_TRACE_HANDLER
 
 #ifndef TIRA_USE_LIBC
 __attribute__((naked)) void _start(void) {
@@ -608,3 +625,138 @@ struct timespec ts;
 vdso_clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
 
 */
+
+typedef struct cpu_set_t { unsigned long __bits[128/sizeof(long)]; } cpu_set_t;
+
+// ref https://github.com/kraj/musl/blob/8cb84492b0245d70b2cd0edd523e2b55c7ad67a9/src/sched/sched_cpucount.c
+int CPU_COUNT(cpu_set_t *set) {
+    usize i, j, cnt=0;
+	const unsigned char *p = (const void *)set;
+	for (i=0; i<sizeof(*set); i++) for (j=0; j<8; j++)
+		if (p[i] & (1<<j)) cnt++;
+	return cnt;
+}
+
+// ref https://github.com/kraj/musl/blob/8cb84492b0245d70b2cd0edd523e2b55c7ad67a9/src/sched/affinity.c
+int sched_getaffinity(pid_t pid, usize cpusetsize, cpu_set_t *mask) {
+    long ret = (long)syscall3(SYS_sched_getaffinity, (long)pid, (long)cpusetsize, (long)mask);
+    if (ret < 0) return ret;
+    if (ret < cpusetsize) memset((uint8_t*)mask + ret, 0, cpusetsize - ret);
+    return 0;
+}
+
+int os_get_logical_cores(void) {
+    cpu_set_t cpuset;
+    sched_getaffinity(0, sizeof(cpuset), &cpuset);
+    return CPU_COUNT(&cpuset);
+}
+
+
+
+#define CLONE_VM        0x00000100  // share memory
+#define CLONE_FS        0x00000200  // share filesystem
+#define CLONE_FILES     0x00000400  // share file descriptors
+#define CLONE_SIGHAND   0x00000800  // share signal handlers
+#define CLONE_THREAD    0x00010000  // same thread group
+#define CLONE_SYSVSEM   0x00040000  // share semaphores
+#define CLONE_SETTLS    0x00080000  // set TLS register
+#define CLONE_PARENT_SETTID  0x00100000
+#define CLONE_CHILD_CLEARTID 0x00200000
+#define CLONE_CHILD_SETTID	 0x01000000
+
+#define FUTEX_WAIT		0
+#define FUTEX_WAKE		1
+#define FUTEX_FD		2
+#define FUTEX_REQUEUE		3
+#define FUTEX_CMP_REQUEUE	4
+#define FUTEX_WAKE_OP		5
+#define FUTEX_LOCK_PI		6
+#define FUTEX_UNLOCK_PI		7
+#define FUTEX_TRYLOCK_PI	8
+#define FUTEX_WAIT_BITSET	9
+
+#define FUTEX_PRIVATE 128
+
+#define FUTEX_CLOCK_REALTIME 256
+
+
+// NOTE SYSCALL CLONE, not Clib clone() etc.
+// The signature for the syscall is different for different platforms
+// x86-64 below:
+//            long clone(unsigned long flags, void *stack,
+//                   int *parent_tid, int *child_tid,
+//                   unsigned long tls);
+__attribute__((naked)) long clone(unsigned long flags, void *stack,
+        int *parent_tid, int *child_tid,
+        unsigned long tls) {
+    
+    __asm__ volatile (
+        ".intel_syntax noprefix\n"
+        "mov eax, 56\n"
+        "mov r10, rcx\n"    // child_tid: rcx -> r10
+        "syscall\n"
+        "ret\n"
+    );
+}
+
+__attribute__((naked)) void thread_trampoline(thread_fn fn, void *arg) {
+    __asm__ volatile (
+        ".intel_syntax noprefix\n"
+        "mov rax, [rsp]\n"      // fn
+        "mov rdi, [rsp+8]\n"    // arg
+        "add rsp, 16\n"
+        "call rax\n"
+        "mov rax, 60\n"         // SYS_exit
+        "xor rdi, rdi\n"
+        "syscall\n"
+        ::: "rax", "rdi", "memory"
+    );
+}
+
+int futex(int *uaddr, int op, int val/* , const struct timespec *timeout, int *uaddr2, int val3 */) {
+    return syscall3(SYS_futex, (long)uaddr, (long)op, (long)val);
+}
+
+#define STACK_SIZE kilobytes(64)
+
+
+
+int thread_spawn(Thread *thread, thread_fn fn, void *arg) {
+    void *stack = mmap(0, STACK_SIZE, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+    // TODO need to review calls to mmap
+    // should not be checking for < 0    
+    if ((uintptr_t)stack > (uintptr_t)-4096) {
+        return -1;
+    }
+
+    // TODO another thing to consider is mmaping another region underneath, such that if the
+    // stack overflows this will at least try to write into memory that is write-protected
+    // from the OS
+
+    thread->stack = stack;
+
+    uintptr_t *sp = (uintptr_t*)((uintptr_t)((uint8_t*) stack + STACK_SIZE) & ~0xF);
+    *(--sp) = (uintptr_t)arg;
+    *(--sp) = (uintptr_t)fn;
+    *(--sp) = (uintptr_t)thread_trampoline;
+
+    unsigned long flags = CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND | CLONE_THREAD
+        | CLONE_SYSVSEM | CLONE_PARENT_SETTID | CLONE_CHILD_CLEARTID;
+
+    int thread_id = clone(flags, sp, &thread->tid, &thread->tid, 0);
+
+    if (thread_id < 0) {
+        munmap(stack, STACK_SIZE);
+        return -1;
+    }
+
+    return thread_id;
+}
+
+void thread_join(Thread *t) {
+    while (t->tid != 0) {
+        int err = futex(&t->tid, FUTEX_WAIT | FUTEX_PRIVATE, t->tid);
+    }
+    munmap(t->stack, STACK_SIZE);
+}
+

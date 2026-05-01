@@ -16,7 +16,7 @@ typedef enum {
 typedef struct {
     SemanticEntityKind kind;
     ParserNode *node;
-    bool is_rhs_constexpr;
+    b8 is_rhs_constexpr;
 } SemanticEntity;
 
 
@@ -52,7 +52,7 @@ b32 nodekind_is_literal(ParserNodeKind kind) {
 }
 
 // Semantic entities are identifiers, not literals
-bool check_if_constexpr(SemanticContext *ctx, SemanticEntity *entity) {
+b32 check_if_constexpr(SemanticContext *ctx, SemanticEntity *entity) {
     return false;
 }
 
@@ -62,7 +62,7 @@ SemanticEntity *get_semantic_entity(SemanticContext *ctx, ParserNode *node) {
 
 // Need to check that the r-values are constants, expressions of constants, or expressions of vardecls that are constants
 // Returns true if constexpr
-bool check_var_decl_rhs_constexpr(SemanticContext *ctx, SemanticEntity *var_decl) {
+b32 check_var_decl_rhs_constexpr(SemanticContext *ctx, SemanticEntity *var_decl) {
     ParserNode *rhs = var_decl->node->const_var_decl.rhs;
 
     if (rhs == NULL) {
